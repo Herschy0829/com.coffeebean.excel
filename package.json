@@ -1,0 +1,20 @@
+{
+  "name": "com.coffeebean.excel",
+  "version": "0.1.0",
+  "displayName": "CoffeeBean Excel",
+  "description": "Editor-only config-table toolchain for the CoffeeBean framework: Excel reading (MiniExcel) with header detection and aliases, type inference, and generation of JSON + C# data classes + getters. Standalone, no dependencies.",
+  "unity": "6000.0",
+  "author": {
+    "name": "Herschy0829"
+  },
+  "keywords": ["coffeebean", "excel", "config-table", "codegen", "tools"],
+  "dependencies": {},
+  "testables": ["com.coffeebean.excel"],
+  "samples": [
+    {
+      "displayName": "Excel Demo",
+      "description": "Excel 工具演示：样例配置表 + 生成 JSON/C# 数据类/Getter 的完整流程。",
+      "path": "Samples~/ExcelDemo"
+    }
+  ]
+}

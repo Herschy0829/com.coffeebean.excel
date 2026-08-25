@@ -1,0 +1,21 @@
+{
+  "name": "CoffeeBean.Excel.Tests",
+  "rootNamespace": "CoffeeBean.Excel.Tests",
+  "references": [
+    "CoffeeBean.Excel.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}
