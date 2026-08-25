@@ -48,6 +48,8 @@ var options = new CExcelGenerateOptions
     Namespace = "Config",
 };
 CExcelGenerateResult result = CExcelGenerator.Generate("Assets/Excel/ChapterConfig.xlsx", options);
+// 或批量（全 sheet）：
+CExcelGenerateResult all = CExcelGenerator.GenerateAllSheets("Assets/Excel/ChapterConfig.xlsx", options);
 ```
 
 产物（输出目录下）：
@@ -55,7 +57,31 @@ CExcelGenerateResult result = CExcelGenerator.Generate("Assets/Excel/ChapterConf
 - `ChapterConfig.cs` —— 强类型数据类（`Id` / `Name` / `Price` / `Rewards`）
 - `ChapterConfigGetter.cs` —— 加载器
 
-### 3. 运行时读取
+### 3. 多 Sheet 与分章节（对齐项目约定）
+
+- **多 Sheet**：`GenerateAllSheets` 处理全部 sheet，**跳过名字含 `sheet`/`debug` 的**（如默认 `Sheet1`）
+- **分章节**：sheet 名形如 `前缀_数字`（`ChapterConfig_1`、`ChapterConfig_2`）→ 同前缀聚合：
+
+```
+ChapterConfig_1.json / ChapterConfig_2.json    每章节数据
+ChapterConfigConfigBase.cs                     章节基类（全字段）
+ChapterConfig_1Config.cs / _2Config.cs         每章节子类（: 基类）
+ChapterConfig_1Getter.cs / _2Getter.cs         每章节独立加载器
+ChapterConfigGetter.cs                         聚合加载器（按章节查询）
+```
+
+```csharp
+ChapterConfigGetter.GetByID(100, chapterId: 1);   // 按章节 + 主键查询
+ChapterConfigGetter.GetChapter(chapterId: 2);     // 取某章节全部行（基类 IEnumerable）
+ChapterConfigGetter.Chapter1;                     // 第一章强类型 List
+```
+
+### 4. 列中文说明（生成代码注释）
+
+双行表头时（第 0 行中文说明 + 第 1 行字段名），中文说明行会作为**字段注释**写入生成的 C# 类；
+单行表头（英文列名）时生成代码为纯英文。
+
+### 5. 运行时读取
 
 ```csharp
 // JSON 放 Resources/Configs/ 下
@@ -63,11 +89,11 @@ var all = ChapterConfigGetter.All;       // List<ChapterConfig>（懒加载）
 var cfg = ChapterConfigGetter.Get(1);    // 按主键查询（默认第一个 *_i/_l/_s 列）
 ```
 
-### 4. 编辑器窗口
+### 6. 编辑器窗口
 
 `Window > CoffeeBean > Excel Tools`：选表 → 预览（表头行/列类型/行数/问题）→ 生成 / 批量生成目录。
 
-### 5. 读取 API（供工具链/其他模块复用）
+### 7. 读取 API（供工具链/其他模块复用）
 
 ```csharp
 CExcelReadResult read = CExcelReader.Read(path, new CExcelReadOptions

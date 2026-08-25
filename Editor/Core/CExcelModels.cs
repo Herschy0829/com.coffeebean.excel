@@ -68,6 +68,12 @@ namespace CoffeeBean.Excel
         /// <summary>问题列表（错误/警告分级）。</summary>
         public List<CExcelIssue> Issues = new List<CExcelIssue>();
 
+        /// <summary>
+        /// 列中文说明（表头行上方最近一行的对应单元格；双行表头"中文说明行"）。
+        /// 生成代码时用作字段注释（对齐项目约定：第 0 行中文说明、第 1 行字段名）。
+        /// </summary>
+        public Dictionary<string, string> ColumnComments = new Dictionary<string, string>();
+
         /// <summary>表头行索引（0-based）。</summary>
         public int HeaderRowIndex;
 

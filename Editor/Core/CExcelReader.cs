@@ -20,6 +20,22 @@ namespace CoffeeBean.Excel
     /// </summary>
     public static class CExcelReader
     {
+        /// <summary>列出 Excel 文件的全部 sheet 名（MiniExcel.GetSheetNames）。文件不存在返回空列表。</summary>
+        public static List<string> GetSheetNames(string path)
+        {
+            var names = new List<string>();
+            try
+            {
+                if (File.Exists(path))
+                    names.AddRange(MiniExcel.GetSheetNames(path));
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogWarning($"[CoffeeBean.Excel] 读取 sheet 列表失败: {e.Message}");
+            }
+            return names;
+        }
+
         /// <summary>读取 Excel 表。路径不存在 / 损坏时返回带错误的结果（不抛异常）。</summary>
         public static CExcelReadResult Read(string path, CExcelReadOptions options = null)
         {
@@ -87,6 +103,19 @@ namespace CoffeeBean.Excel
                         Message = "未检测到带类型后缀的列名（表头行 " + (result.HeaderRowIndex + 1) + "）",
                     });
                     return result;
+                }
+
+                // 列中文说明：表头行上方最近一行的对应单元格（双行表头"中文说明行"→ 字段注释）
+                if (result.HeaderRowIndex > 0)
+                {
+                    var commentRow = rows[result.HeaderRowIndex - 1];
+                    foreach (string column in result.Columns)
+                    {
+                        string letter = normalized[column];
+                        object comment = commentRow.TryGetValue(letter, out object c) ? c : null;
+                        string text = CExcelValue.ToText(comment).Trim();
+                        if (text.Length > 0) result.ColumnComments[column] = text;
+                    }
                 }
 
                 // 数据行（表头之后；Excel 行号 = 行索引 + 1）

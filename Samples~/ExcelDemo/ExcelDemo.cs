@@ -8,7 +8,7 @@ namespace CoffeeBean.Excel.Demo
 {
     /// <summary>
     /// Excel 工具示例（Editor 菜单）：一键生成演示配置表并跑通完整流程——
-    /// 创建样例 xlsx（MiniExcel 写出）→ CExcelReader 读取 → CExcelGenerator 生成三件套。
+    /// 创建样例 xlsx（MiniExcel 写出）→ CExcelReader 读取 → CExcelGenerator 生成。
     /// 菜单：Tools/CoffeeBean Excel/生成示例配置表
     /// </summary>
     public static class ExcelDemo
@@ -21,17 +21,15 @@ namespace CoffeeBean.Excel.Demo
             if (!AssetDatabase.IsValidFolder(DemoFolder))
                 AssetDatabase.CreateFolder("Assets", "ExcelDemo");
 
-            // 1. 造一张样例表（"中文说明行 + 字段名行"双行表头，验证表头检测）
+            // 1. 造一张样例表（列名带类型后缀；表头中文说明行可选——若存在会作为生成代码的字段注释）
             string xlsxPath = Path.Combine(DemoFolder, "ChapterConfig.xlsx");
-            MiniExcel.SaveAs(xlsxPath, new object[][]
+            var rows = new List<IDictionary<string, object>>
             {
-                new object[] { "章节ID", "章节名称", "关卡数", "奖励" },
-                new object[] { "Id_i", "Name_s", "StageCount_i", "Rewards_ia" },
-                new object[] { 1, "第一章 晨曦山谷", 5, "100;200;300" },
-                new object[] { 2, "第二章 迷雾森林", 8, "400;500" },
-                new object[] { 3, "第三章 熔火地窟", 12, "" },
-                new object[] { "# 末尾注释：奖励为金币数量数组", null, null, null },
-            });
+                DemoRow("Id_i", 1, "Name_s", "第一章 晨曦山谷", "StageCount_i", 5, "Rewards_ia", "100;200;300"),
+                DemoRow("Id_i", 2, "Name_s", "第二章 迷雾森林", "StageCount_i", 8, "Rewards_ia", "400;500"),
+                DemoRow("Id_i", 3, "Name_s", "第三章 熔火地窟", "StageCount_i", 12, "Rewards_ia", ""),
+            };
+            MiniExcel.SaveAs(xlsxPath, rows, overwriteFile: true);
             AssetDatabase.Refresh();
 
             // 2. 读取 + 预览
@@ -43,7 +41,7 @@ namespace CoffeeBean.Excel.Demo
                 return;
             }
 
-            // 3. 生成三件套
+            // 3. 生成三件套（普通表：JSON + 数据类 + Getter）
             var options = new CExcelGenerateOptions
             {
                 OutputFolder = DemoFolder + "/Generated",
@@ -60,6 +58,14 @@ namespace CoffeeBean.Excel.Demo
             {
                 Debug.LogError("[ExcelDemo] 生成失败:\n" + string.Join("\n", result.Issues));
             }
+        }
+
+        private static Dictionary<string, object> DemoRow(params object[] keyValues)
+        {
+            var row = new Dictionary<string, object>();
+            for (int i = 0; i + 1 < keyValues.Length; i += 2)
+                row[(string)keyValues[i]] = keyValues[i + 1];
+            return row;
         }
     }
 }

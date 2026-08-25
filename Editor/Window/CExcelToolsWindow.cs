@@ -21,7 +21,6 @@ namespace CoffeeBean.Excel
         private string _primaryKey = string.Empty;
         private bool _generateJson = true;
         private bool _generateClass = true;
-        private bool _generateGetter = true;
 
         private CExcelReadResult _preview;
         private Vector2 _scroll;
@@ -72,8 +71,7 @@ namespace CoffeeBean.Excel
             _primaryKey = EditorGUILayout.TextField("主键列（空 = 自动）", _primaryKey);
             EditorGUILayout.BeginHorizontal();
             _generateJson = EditorGUILayout.Toggle("生成 JSON", _generateJson);
-            _generateClass = EditorGUILayout.Toggle("生成 C# 类", _generateClass);
-            _generateGetter = EditorGUILayout.Toggle("生成 Getter", _generateGetter);
+            _generateClass = EditorGUILayout.Toggle("生成 C# 类 + Getter", _generateClass);
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space(6);
@@ -174,7 +172,6 @@ namespace CoffeeBean.Excel
                 PrimaryKey = string.IsNullOrWhiteSpace(_primaryKey) ? null : _primaryKey,
                 GenerateJson = _generateJson,
                 GenerateClass = _generateClass,
-                GenerateGetter = _generateGetter,
             };
 
         private void Report(CExcelGenerateResult result)

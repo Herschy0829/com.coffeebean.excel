@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.1] - 2025-xx-xx
+
+### Added
+- **多 Sheet 支持**：`CExcelReader.GetSheetNames`；`CExcelGenerator.GenerateAllSheets` 全 sheet 生成
+  （跳过名字含 `sheet`/`debug` 的 sheet，对齐 Idle 约定）
+- **分章节（多章节）**：sheet 名 `前缀_数字`（如 `ChapterConfig_1`）→ 生成
+  章节基类 `前缀ConfigBase` + 每章节子类 + 每章节 Getter + **聚合 Getter `前缀Getter`**
+  （`GetByID(id, chapterId)` / `GetChapter(chapterId)` 按章节查询，对齐 Idle 的 DataGetter 模式）
+- **列中文说明**：双行表头时表头行上方的中文说明行作为生成代码的字段注释（对齐 Idle）；
+  单行表头（英文列名）生成代码为纯英文（文件头/注释均英文化，去掉工具性中文）
+
+### Changed
+- `Generate` 支持 `SheetName` / `ClassName` 选项；`GenerateFolder` 走全 sheet 生成
+- 生成代码注释：字段注释取表头说明行（无则用源列名）
+
 ## [0.1.0] - 2025-xx-xx
 
 ### Added
