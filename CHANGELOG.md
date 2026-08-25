@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.2] - 2025-xx-xx
+
+### Changed
+- **工具窗口重构**：主窗口改为**文件夹批量生成**（选择一次文件夹后 EditorPrefs 记忆，无需重选），
+  一键增量生成 / 强制重新生成 / 清空状态，逐表状态列表（已生成 / 未变化跳过 / 失败）
+- **二级窗口 `CExcelFileWindow`**：单文件 sheet 选择 → 预览（表头 / 列类型 / 行数 / 列说明 / 问题）→ 校验 / 单 sheet 生成
+- **增量生成 `CExcelIncrementalGenerator`**：按文件最后修改时间记录生成状态（EditorPrefs 持久），
+  未变化的表跳过重新生成（对齐 Idle 的 IsFileChange 机制）
+
+### Added
+- 增量状态测试 6 个（修改时间对比 / 记录 / 单文件与全量清空）
+
 ## [0.1.1] - 2025-xx-xx
 
 ### Added
