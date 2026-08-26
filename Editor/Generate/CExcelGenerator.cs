@@ -30,6 +30,12 @@ namespace CoffeeBean.Excel
 
         /// <summary>是否生成 C# 数据类 / Getter（默认 true）。</summary>
         public bool GenerateClass = true;
+
+        /// <summary>JSON 输出目录（必须位于 Resources 下，否则运行时 Resources.Load 读不到；默认 Assets/Resources/Configs）。</summary>
+        public string JsonResourcesFolder = "Assets/Resources/Configs";
+
+        /// <summary>Getter 的 Resources 相对路径（默认 "Configs"，与 JsonResourcesFolder 对齐）。</summary>
+        public string ResourcesPath = "Configs";
     }
 
     /// <summary>生成结果。</summary>
@@ -185,7 +191,7 @@ namespace CoffeeBean.Excel
                 {
                     EnsureFolder(options.OutputFolder);
                     string getterPath = Path.Combine(options.OutputFolder, group.Key + "Getter.cs");
-                    File.WriteAllText(getterPath, WriteChapterGetter(table, group.Key, group.Value, options.Namespace), new UTF8Encoding(false));
+                    File.WriteAllText(getterPath, WriteChapterGetter(table, group.Key, group.Value, options.Namespace, options.ResourcesPath), new UTF8Encoding(false));
                     result.GeneratedFiles.Add(getterPath);
                 }
                 catch (Exception e)
@@ -228,7 +234,9 @@ namespace CoffeeBean.Excel
 
                 if (options.GenerateJson)
                 {
-                    string jsonPath = Path.Combine(options.OutputFolder, className + ".json");
+                    // JSON 必须生成到 Resources 下，运行时 Resources.Load 才能读到
+                    EnsureFolder(options.JsonResourcesFolder);
+                    string jsonPath = Path.Combine(options.JsonResourcesFolder, className + ".json");
                     File.WriteAllText(jsonPath, WriteJson(table), new UTF8Encoding(false));
                     result.GeneratedFiles.Add(jsonPath);
                 }
@@ -247,7 +255,7 @@ namespace CoffeeBean.Excel
                         result.GeneratedFiles.Add(subPath);
 
                         string getterPath = Path.Combine(options.OutputFolder, sheetName + "Getter.cs");
-                        File.WriteAllText(getterPath, WriteGetter(table, sheetName, sheetName + "Config", options.Namespace), new UTF8Encoding(false));
+                        File.WriteAllText(getterPath, WriteGetter(table, sheetName, sheetName + "Config", options.Namespace, options.ResourcesPath), new UTF8Encoding(false));
                         result.GeneratedFiles.Add(getterPath);
                     }
                     else
@@ -257,7 +265,7 @@ namespace CoffeeBean.Excel
                         result.GeneratedFiles.Add(classPath);
 
                         string getterPath = Path.Combine(options.OutputFolder, className + "Getter.cs");
-                        File.WriteAllText(getterPath, WriteGetter(table, className, className, options.Namespace), new UTF8Encoding(false));
+                        File.WriteAllText(getterPath, WriteGetter(table, className, className, options.Namespace, options.ResourcesPath), new UTF8Encoding(false));
                         result.GeneratedFiles.Add(getterPath);
                     }
                 }
@@ -491,11 +499,13 @@ namespace CoffeeBean.Excel
 
         /// <param name="className">Getter 类名与 AssetPath（普通表 = 表名；章节 = sheet 名）。</param>
         /// <param name="dataType">数据类名（普通表 = 表名；章节 = 子类名，如 ChapterConfig_1Config）。</param>
-        private static string WriteGetter(CExcelTable table, string className, string dataType, string ns)
+        /// <param name="resourcesPath">Resources 相对路径（如 "Configs"）。</param>
+        private static string WriteGetter(CExcelTable table, string className, string dataType, string ns, string resourcesPath)
         {
             CExcelFieldKind keyKind = table.Kinds[table.PrimaryKey];
             string keyType = CExcelTypeInfer.CSharpType(keyKind);
             string keyField = CExcelTypeInfer.ToFieldName(table.PrimaryKey);
+            string assetPath = resourcesPath + "/" + className;
 
             var sb = new StringBuilder();
             sb.AppendLine(HeaderLine);
@@ -509,7 +519,7 @@ namespace CoffeeBean.Excel
             sb.AppendLine("    /// <summary>" + className + " config loader (auto-generated).</summary>");
             sb.AppendLine("    public static class " + className + "Getter");
             sb.AppendLine("    {");
-            sb.AppendLine("        private const string AssetPath = \"Configs/" + className + "\";");
+            sb.AppendLine("        private const string AssetPath = \"" + assetPath + "\";");
             sb.AppendLine("        private static List<" + dataType + "> _all;");
             sb.AppendLine("        private static Dictionary<" + keyType + ", " + dataType + "> _byKey;");
             sb.AppendLine();
@@ -546,13 +556,14 @@ namespace CoffeeBean.Excel
 
         // ========== 多章节：聚合 Getter ==========
 
-        private static string WriteChapterGetter(CExcelTable table, string frontName, List<int> chapters, string ns)
+        private static string WriteChapterGetter(CExcelTable table, string frontName, List<int> chapters, string ns, string resourcesPath)
         {
             CExcelFieldKind keyKind = table.Kinds[table.PrimaryKey];
             string keyType = CExcelTypeInfer.CSharpType(keyKind);
             string keyField = CExcelTypeInfer.ToFieldName(table.PrimaryKey);
             string baseClass = frontName + "ConfigBase";
             string chaptersArray = string.Join(", ", chapters.Select(i => i.ToString(CultureInfo.InvariantCulture)));
+            string assetPath = resourcesPath + "/" + frontName + "_";
 
             var sb = new StringBuilder();
             sb.AppendLine(HeaderLine);
@@ -606,8 +617,8 @@ namespace CoffeeBean.Excel
             sb.AppendLine();
             sb.AppendLine("        private static List<T> Load<T>(int chapterId) where T : " + baseClass);
             sb.AppendLine("        {");
-            sb.AppendLine("            TextAsset asset = Resources.Load<TextAsset>(\"Configs/" + frontName + "_\" + chapterId);");
-            sb.AppendLine("            if (asset == null) { Debug.LogError(\"Config missing: Configs/" + frontName + "_\" + chapterId); return new List<T>(); }");
+            sb.AppendLine("            TextAsset asset = Resources.Load<TextAsset>(\"" + assetPath + "\" + chapterId);");
+            sb.AppendLine("            if (asset == null) { Debug.LogError(\"Config missing: " + assetPath + "\" + chapterId); return new List<T>(); }");
             sb.AppendLine("            var wrapper = JsonUtility.FromJson<Wrapper<T>>(asset.text);");
             sb.AppendLine("            return wrapper != null ? wrapper.data : new List<T>();");
             sb.AppendLine("        }");

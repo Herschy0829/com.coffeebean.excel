@@ -37,10 +37,31 @@ namespace CoffeeBean.Excel.Tests
                 OutputFolder = _tmpOut,
                 Namespace = ns,
                 ClassName = className,
+                JsonResourcesFolder = _tmpOut + "/Resources", // 测试自包含：JSON 输出到临时 Resources 目录
+                ResourcesPath = "Configs",
             };
             CExcelGenerateResult result = CExcelGenerator.Generate(_tmpXlsx, options);
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
             return result;
+        }
+
+        [Test]
+        public void Generate_Json_GoesToResourcesFolder()
+        {
+            Generate("TestTable");
+
+            // JSON 应生成在 Resources 目录（而非代码输出目录），运行时 Resources.Load 才能读到
+            Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "Resources", "TestTable.json")), "JSON 应输出到 Resources 目录");
+            Assert.IsFalse(File.Exists(Path.Combine(_tmpOut, "TestTable.json")), "代码输出目录不应放 JSON");
+        }
+
+        [Test]
+        public void Generate_Getter_AssetPath_MatchesResourcesPath()
+        {
+            Generate("TestTable");
+            string getterText = File.ReadAllText(Path.Combine(_tmpOut, "TestTableGetter.cs"));
+
+            StringAssert.Contains("AssetPath = \"Configs/TestTable\"", getterText, "Getter 应通过 Resources 相对路径加载");
         }
 
         [Test]
@@ -58,7 +79,7 @@ namespace CoffeeBean.Excel.Tests
         public void Generate_Json_ValidAndDataCount()
         {
             Generate("TestTable");
-            string json = File.ReadAllText(Path.Combine(_tmpOut, "TestTable.json"));
+            string json = File.ReadAllText(Path.Combine(_tmpOut, "Resources", "TestTable.json"));
 
             StringAssert.StartsWith("{\"data\":[", json);
             Assert.AreEqual(2, CountOccurrences(json, "\"Id\":"), "应有 2 行数据");
@@ -110,6 +131,7 @@ namespace CoffeeBean.Excel.Tests
                 Namespace = "MyGame.Data",
                 ClassName = "CustomTable",
                 PrimaryKey = "Name_s",
+                JsonResourcesFolder = _tmpOut + "/Resources",
             };
             CExcelGenerateResult result = CExcelGenerator.Generate(_tmpXlsx, options);
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
@@ -168,7 +190,7 @@ namespace CoffeeBean.Excel.Tests
                 File.Move(b, Path.Combine(folder, "~$A.xlsx"));
 
                 CExcelGenerateResult result = CExcelGenerator.GenerateFolder(folder,
-                    new CExcelGenerateOptions { OutputFolder = _tmpOut });
+                    new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources" });
 
                 Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
                 Assert.AreEqual(3, result.GeneratedFiles.Count, "只生成正式表（跳过 ~$ 临时表）");

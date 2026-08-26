@@ -38,13 +38,13 @@ namespace CoffeeBean.Excel.Tests
         public void GenerateAllSheets_ProducesChapterArtifacts()
         {
             CExcelGenerateResult result = CExcelGenerator.GenerateAllSheets(_tmpXlsx,
-                new CExcelGenerateOptions { OutputFolder = _tmpOut, Namespace = "Config" });
+                new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources", Namespace = "Config" });
 
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
 
-            // 每章节：JSON + 子类 + 章节 Getter；聚合：基类 + 聚合 Getter
-            Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "ChapterConfig_1.json")));
-            Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "ChapterConfig_2.json")));
+            // 每章节：JSON（Resources 目录）+ 子类 + 章节 Getter；聚合：基类 + 聚合 Getter
+            Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "Resources", "ChapterConfig_1.json")));
+            Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "Resources", "ChapterConfig_2.json")));
             Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "ChapterConfigConfigBase.cs")), "应生成章节基类");
             Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "ChapterConfig_1Config.cs")), "应生成章节子类");
             Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "ChapterConfig_2Config.cs")));
@@ -55,7 +55,7 @@ namespace CoffeeBean.Excel.Tests
         [Test]
         public void ChapterGetter_ProvidesChapterQueries()
         {
-            CExcelGenerator.GenerateAllSheets(_tmpXlsx, new CExcelGenerateOptions { OutputFolder = _tmpOut });
+            CExcelGenerator.GenerateAllSheets(_tmpXlsx, new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources" });
             string getter = File.ReadAllText(Path.Combine(_tmpOut, "ChapterConfigGetter.cs"));
 
             StringAssert.Contains("public static readonly int[] Chapters = new[] { 1, 2 };", getter);
@@ -71,7 +71,7 @@ namespace CoffeeBean.Excel.Tests
         [Test]
         public void ChapterSubClass_InheritsBase()
         {
-            CExcelGenerator.GenerateAllSheets(_tmpXlsx, new CExcelGenerateOptions { OutputFolder = _tmpOut });
+            CExcelGenerator.GenerateAllSheets(_tmpXlsx, new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources" });
             string sub = File.ReadAllText(Path.Combine(_tmpOut, "ChapterConfig_1Config.cs"));
 
             StringAssert.Contains("public sealed class ChapterConfig_1Config : ChapterConfigConfigBase", sub);
@@ -81,7 +81,7 @@ namespace CoffeeBean.Excel.Tests
         [Test]
         public void ChapterBaseClass_DeclaresAllFields()
         {
-            CExcelGenerator.GenerateAllSheets(_tmpXlsx, new CExcelGenerateOptions { OutputFolder = _tmpOut });
+            CExcelGenerator.GenerateAllSheets(_tmpXlsx, new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources" });
             string baseClass = File.ReadAllText(Path.Combine(_tmpOut, "ChapterConfigConfigBase.cs"));
 
             StringAssert.Contains("public class ChapterConfigConfigBase", baseClass);
@@ -100,7 +100,7 @@ namespace CoffeeBean.Excel.Tests
             try
             {
                 CExcelGenerateResult result = CExcelGenerator.GenerateAllSheets(path,
-                    new CExcelGenerateOptions { OutputFolder = _tmpOut });
+                    new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources" });
 
                 Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
                 Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "Normal.cs")), "正常 sheet 应生成");
@@ -123,7 +123,7 @@ namespace CoffeeBean.Excel.Tests
             try
             {
                 CExcelGenerateResult result = CExcelGenerator.Generate(path,
-                    new CExcelGenerateOptions { OutputFolder = _tmpOut, ClassName = "CustomName" });
+                    new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources", ClassName = "CustomName" });
 
                 Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
                 Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "CustomName.cs")));
@@ -146,7 +146,7 @@ namespace CoffeeBean.Excel.Tests
             try
             {
                 CExcelGenerateResult result = CExcelGenerator.Generate(path,
-                    new CExcelGenerateOptions { OutputFolder = _tmpOut, ClassName = "Plain" });
+                    new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources", ClassName = "Plain" });
                 Assert.IsTrue(result.Success);
 
                 string classText = File.ReadAllText(Path.Combine(_tmpOut, "Plain.cs"));

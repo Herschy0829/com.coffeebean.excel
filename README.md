@@ -84,10 +84,17 @@ ChapterConfigGetter.Chapter1;                     // 第一章强类型 List
 ### 5. 运行时读取
 
 ```csharp
-// JSON 放 Resources/Configs/ 下
+// JSON 生成在 Resources/Configs/ 下（生成选项 JsonResourcesFolder，默认 Assets/Resources/Configs）
 var all = ChapterConfigGetter.All;       // List<ChapterConfig>（懒加载）
 var cfg = ChapterConfigGetter.Get(1);    // 按主键查询（默认第一个 *_i/_l/_s 列）
 ```
+
+**运行时加载机制**：生成的 Getter 用 `Resources.Load<TextAsset>("Configs/ChapterConfig")`（`ResourcesPath` + 类名）
+→ JsonUtility 反序列化 `{"data":[...]}` 包装。**JSON 必须生成在 Resources 目录下**（生成器默认直接写入
+`Assets/Resources/Configs/`，与 Getter 的 AssetPath 对齐，无需手动拷贝）。
+
+> 需要 Addressables / AssetBundle 按需加载的大表场景：当前 Getter 固定走 Resources（打进包）；
+> 可自定义加载器或等待后续版本支持 LoadMode。
 
 ### 6. 编辑器窗口
 

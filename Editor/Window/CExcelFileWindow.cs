@@ -112,6 +112,8 @@ namespace CoffeeBean.Excel
                 OutputFolder = EditorPrefs.GetString("CoffeeBean.Excel.OutputFolder", "Assets/Configs/Generated"),
                 Namespace = EditorPrefs.GetString("CoffeeBean.Excel.Namespace", "Config"),
                 SheetName = _sheets[_sheetIndex],
+                JsonResourcesFolder = EditorPrefs.GetString("CoffeeBean.Excel.JsonResourcesFolder", "Assets/Resources/Configs"),
+                ResourcesPath = EditorPrefs.GetString("CoffeeBean.Excel.ResourcesPath", "Configs"),
             };
             CExcelGenerateResult result = CExcelGenerator.Generate(_path, options);
             if (result.Success)

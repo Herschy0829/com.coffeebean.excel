@@ -16,10 +16,14 @@ namespace CoffeeBean.Excel
         private const string PrefFolder = "CoffeeBean.Excel.Folder";
         private const string PrefOutputFolder = "CoffeeBean.Excel.OutputFolder";
         private const string PrefNamespace = "CoffeeBean.Excel.Namespace";
+        private const string PrefJsonResources = "CoffeeBean.Excel.JsonResourcesFolder";
+        private const string PrefResourcesPath = "CoffeeBean.Excel.ResourcesPath";
 
         private string _folder;
         private string _outputFolder = "Assets/Configs/Generated";
         private string _namespace = "Config";
+        private string _jsonResourcesFolder = "Assets/Resources/Configs";
+        private string _resourcesPath = "Configs";
         private string _primaryKey = string.Empty;
         private bool _generateJson = true;
         private bool _generateClass = true;
@@ -44,6 +48,8 @@ namespace CoffeeBean.Excel
             _folder = EditorPrefs.GetString(PrefFolder, string.Empty);
             _outputFolder = EditorPrefs.GetString(PrefOutputFolder, "Assets/Configs/Generated");
             _namespace = EditorPrefs.GetString(PrefNamespace, "Config");
+            _jsonResourcesFolder = EditorPrefs.GetString(PrefJsonResources, "Assets/Resources/Configs");
+            _resourcesPath = EditorPrefs.GetString(PrefResourcesPath, "Configs");
             RefreshFileList();
         }
 
@@ -82,7 +88,9 @@ namespace CoffeeBean.Excel
             // 生成选项
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("生成选项", EditorStyles.boldLabel);
-            _outputFolder = EditorGUILayout.TextField("输出目录", _outputFolder);
+            _outputFolder = EditorGUILayout.TextField("代码输出目录", _outputFolder);
+            _jsonResourcesFolder = EditorGUILayout.TextField("JSON Resources 目录", _jsonResourcesFolder);
+            _resourcesPath = EditorGUILayout.TextField("Resources 相对路径", _resourcesPath);
             _namespace = EditorGUILayout.TextField("命名空间", _namespace);
             _primaryKey = EditorGUILayout.TextField("主键列（空 = 自动）", _primaryKey);
             EditorGUILayout.BeginHorizontal();
@@ -94,6 +102,8 @@ namespace CoffeeBean.Excel
                 EditorPrefs.SetString(PrefFolder, _folder);
                 EditorPrefs.SetString(PrefOutputFolder, _outputFolder);
                 EditorPrefs.SetString(PrefNamespace, _namespace);
+                EditorPrefs.SetString(PrefJsonResources, _jsonResourcesFolder);
+                EditorPrefs.SetString(PrefResourcesPath, _resourcesPath);
             }
 
             // 表状态列表
@@ -153,6 +163,8 @@ namespace CoffeeBean.Excel
                 PrimaryKey = string.IsNullOrWhiteSpace(_primaryKey) ? null : _primaryKey,
                 GenerateJson = _generateJson,
                 GenerateClass = _generateClass,
+                JsonResourcesFolder = _jsonResourcesFolder,
+                ResourcesPath = _resourcesPath,
             };
 
             int generated = 0, skipped = 0, failed = 0;

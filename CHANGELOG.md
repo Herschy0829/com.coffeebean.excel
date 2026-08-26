@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.3] - 2025-xx-xx
+
+### Fixed
+- **运行时加载缺陷**：JSON 不再生成到代码输出目录（非 Resources 下 `Resources.Load` 读不到），
+  新增 `JsonResourcesFolder`（默认 `Assets/Resources/Configs`）与 `ResourcesPath`（默认 `Configs`）——
+  JSON 直接生成进 Resources 子目录，Getter 的 `AssetPath` 与 Resources 相对路径对齐，生成完立即可用
+- 窗口生成选项新增"JSON Resources 目录 / Resources 相对路径"配置（EditorPrefs 记忆）
+
+### Notes
+- 运行时加载方式：`Resources.Load<TextAsset>(ResourcesPath + "/" + 类名)` → JsonUtility 反序列化
+  （`{"data":[...]}` 包装）；需要 Addressables / AssetBundle 按需加载的场景请自定义加载或后续版本支持
+
 ## [0.1.2] - 2025-xx-xx
 
 ### Changed
