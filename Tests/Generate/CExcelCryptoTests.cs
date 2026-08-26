@@ -43,6 +43,57 @@ namespace CoffeeBean.Excel.Tests
         }
 
         [Test]
+        public void EncodeDecode_RoundTrip_MultiLanguage()
+        {
+            // 多语言表专项：中/日/emoji/转义字符——字节级 XOR 与编码无关，加密不应乱码
+            string plain = "{\"data\":[{\"Id\":1,\"Zh\":\"中文测试\",\"Ja\":\"日本語テスト\",\"Emoji\":\"🎮🔥\",\"Esc\":\"a\\\"b\\\\c\\nd\\t\"}]}";
+            byte[] cipher = CExcelCrypto.Encode(plain);
+
+            Assert.AreEqual(plain, CExcelCrypto.Decode(cipher), "多语言文本加密往返应无损（无乱码）");
+            // 逐项断言还原
+            string decoded = CExcelCrypto.Decode(cipher);
+            StringAssert.Contains("中文测试", decoded);
+            StringAssert.Contains("日本語テスト", decoded);
+            StringAssert.Contains("🎮🔥", decoded);
+            StringAssert.Contains("a\\\"b\\\\c\\nd\\t", decoded);
+        }
+
+        [Test]
+        public void Generate_MultiLanguageTable_EncryptedFileDecodesCorrectly()
+        {
+            // 完整链路：含多语言数据的表 → 加密生成 → 读文件字节 → 解密还原（模拟运行时 TextAsset.bytes）
+            string xlsx = CExcelTestFactory.CreateTempTable(new[]
+            {
+                CExcelTestFactory.Row("Id_i", 1, "Zh_s", "中文测试", "Ja_s", "日本語テスト", "Emoji_s", "🎮🔥"),
+                CExcelTestFactory.Row("Id_i", 2, "Zh_s", "空值", "Ja_s", "", "Emoji_s", ""),
+            }, "lang_test");
+            try
+            {
+                var options = new CExcelGenerateOptions
+                {
+                    OutputFolder = _tmpOut,
+                    ClassName = "LanguageTable",
+                    JsonResourcesFolder = _tmpOut + "/Resources",
+                    EncryptJson = true,
+                };
+                CExcelGenerateResult result = CExcelGenerator.Generate(xlsx, options);
+                Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
+
+                byte[] cipher = File.ReadAllBytes(Path.Combine(_tmpOut, "Resources", "LanguageTable.json"));
+                Assert.IsFalse(ContainsAscii(cipher, "中文测试"), "密文文件不应含明文中文");
+
+                string decoded = CExcelCrypto.Decode(cipher);
+                StringAssert.Contains("中文测试", decoded);
+                StringAssert.Contains("日本語テスト", decoded);
+                StringAssert.Contains("🎮🔥", decoded);
+            }
+            finally
+            {
+                CExcelTestFactory.DeleteTempFile(xlsx);
+            }
+        }
+
+        [Test]
         public void EncodeDecode_RoundTrip_Deterministic()
         {
             string plain = "{\"data\":[]}";

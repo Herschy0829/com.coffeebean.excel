@@ -97,6 +97,8 @@ var cfg = ChapterConfigGetter.Get(1);    // 按主键查询（默认第一个 *_
 对齐 Idle 项目的简单加密），Getter 运行时透明解密。打包产物里的配置不是明文，防普通读取。
 > ⚠️ 这是**混淆级**保护（key 在生成代码里，不防专业逆向）；真正安全需服务器下发 / AB 加密 / 代码混淆。
 > 调试时可在窗口关闭"加密 JSON"重新生成以便直接查看。
+> ✅ **多语言表同样可加密**：加密是纯字节级 XOR（UTF8 字节 ↔ XOR ↔ TextAsset.bytes 原样还原），与字符编码无关，
+> 中文 / 日文 / emoji 无损往返，**无需 Language 表例外**（Idle 项目的字符级加密才有乱码问题）。
 
 > 需要 Addressables / AssetBundle 按需加载的大表场景：当前 Getter 固定走 Resources（打进包）；
 > 可自定义加载器或等待后续版本支持 LoadMode。
