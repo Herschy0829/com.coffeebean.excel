@@ -4,7 +4,7 @@ using System.Data;
 using System.IO;
 using MiniExcelLibs;
 
-namespace CoffeeBean.Excel
+namespace CoffeeBean
 {
     /// <summary>
     /// 测试工厂：在 Editor 程序集内封装 MiniExcel 写表（测试程序集无法直接引用

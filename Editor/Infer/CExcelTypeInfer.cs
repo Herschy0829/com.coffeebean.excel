@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 
-namespace CoffeeBean.Excel
+namespace CoffeeBean
 {
     /// <summary>字段类型（列名后缀声明 + 无后缀推断）。</summary>
     public enum CExcelFieldKind

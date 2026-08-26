@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace CoffeeBean.Excel
+namespace CoffeeBean
 {
     /// <summary>
     /// 单元格读取与值规范化的内部工具（MiniExcel useHeaderRow:false 时键为列字母）。

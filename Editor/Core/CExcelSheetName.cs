@@ -1,4 +1,4 @@
-namespace CoffeeBean.Excel
+namespace CoffeeBean
 {
     /// <summary>
     /// Sheet 名解析：多章节约定的解析工具。

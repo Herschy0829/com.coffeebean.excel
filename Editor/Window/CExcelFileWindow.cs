@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-namespace CoffeeBean.Excel
+namespace CoffeeBean
 {
     /// <summary>
     /// 单文件校验 / 预览二级窗口：选择 sheet → 预览（表头 / 列类型 / 行数 / 问题）→ 校验 / 生成。

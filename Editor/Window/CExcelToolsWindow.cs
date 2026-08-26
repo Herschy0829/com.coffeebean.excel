@@ -3,7 +3,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-namespace CoffeeBean.Excel
+namespace CoffeeBean
 {
     /// <summary>
     /// Excel 配置表工具主窗口（Window &gt; CoffeeBean &gt; Excel Tools）：

@@ -4,7 +4,7 @@ using System.Globalization;
 using System.IO;
 using MiniExcelLibs;
 
-namespace CoffeeBean.Excel
+namespace CoffeeBean
 {
     /// <summary>
     /// Excel 读取器（MiniExcel 封装，只读 .xlsx）：

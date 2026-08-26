@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace CoffeeBean.Excel
+namespace CoffeeBean
 {
     /// <summary>
     /// 配置 JSON 的简单混淆加密（对齐 Idle 项目的 GetSimpleEncyptString 做法）。

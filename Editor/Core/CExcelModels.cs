@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace CoffeeBean.Excel
+namespace CoffeeBean
 {
     /// <summary>问题级别：Error = 阻塞（解析/校验失败），Warning = 不阻塞（跳过/提示）。</summary>
     public enum CExcelIssueLevel

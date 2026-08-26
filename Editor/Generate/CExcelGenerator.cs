@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-namespace CoffeeBean.Excel
+namespace CoffeeBean
 {
     /// <summary>生成选项。</summary>
     public sealed class CExcelGenerateOptions

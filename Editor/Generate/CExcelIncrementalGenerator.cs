@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 
-namespace CoffeeBean.Excel
+namespace CoffeeBean
 {
     /// <summary>
     /// 增量生成状态：按文件最后修改时间记录"已生成"标记，未变化的表跳过重新生成
