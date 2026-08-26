@@ -39,6 +39,7 @@ namespace CoffeeBean.Excel.Tests
                 ClassName = className,
                 JsonResourcesFolder = _tmpOut + "/Resources", // 测试自包含：JSON 输出到临时 Resources 目录
                 ResourcesPath = "Configs",
+                EncryptJson = false, // 现有断言读明文 JSON；加密行为单独测试
             };
             CExcelGenerateResult result = CExcelGenerator.Generate(_tmpXlsx, options);
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));

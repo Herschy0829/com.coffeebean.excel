@@ -114,6 +114,7 @@ namespace CoffeeBean.Excel
                 SheetName = _sheets[_sheetIndex],
                 JsonResourcesFolder = EditorPrefs.GetString("CoffeeBean.Excel.JsonResourcesFolder", "Assets/Resources/Configs"),
                 ResourcesPath = EditorPrefs.GetString("CoffeeBean.Excel.ResourcesPath", "Configs"),
+                EncryptJson = EditorPrefs.GetBool("CoffeeBean.Excel.EncryptJson", true),
             };
             CExcelGenerateResult result = CExcelGenerator.Generate(_path, options);
             if (result.Success)

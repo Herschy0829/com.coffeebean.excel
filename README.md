@@ -93,6 +93,11 @@ var cfg = ChapterConfigGetter.Get(1);    // 按主键查询（默认第一个 *_
 → JsonUtility 反序列化 `{"data":[...]}` 包装。**JSON 必须生成在 Resources 目录下**（生成器默认直接写入
 `Assets/Resources/Configs/`，与 Getter 的 AssetPath 对齐，无需手动拷贝）。
 
+**JSON 加密（默认开启）**：生成选项 `EncryptJson = true` 时，JSON 以 XOR 密文字节写入（`CExcelCrypto`，
+对齐 Idle 项目的简单加密），Getter 运行时透明解密。打包产物里的配置不是明文，防普通读取。
+> ⚠️ 这是**混淆级**保护（key 在生成代码里，不防专业逆向）；真正安全需服务器下发 / AB 加密 / 代码混淆。
+> 调试时可在窗口关闭"加密 JSON"重新生成以便直接查看。
+
 > 需要 Addressables / AssetBundle 按需加载的大表场景：当前 Getter 固定走 Resources（打进包）；
 > 可自定义加载器或等待后续版本支持 LoadMode。
 

@@ -36,6 +36,13 @@ namespace CoffeeBean.Excel
 
         /// <summary>Getter 的 Resources 相对路径（默认 "Configs"，与 JsonResourcesFolder 对齐）。</summary>
         public string ResourcesPath = "Configs";
+
+        /// <summary>
+        /// 是否对生成的 JSON 做混淆加密（默认 true，对齐 Idle 项目）。
+        /// 加密后打包产物里的配置不是明文（防普通读取）；运行时 Getter 透明解密。
+        /// 注意：这是混淆级保护（key 在生成代码里，不能防专业逆向），调试时可关闭以便直接查看 JSON。
+        /// </summary>
+        public bool EncryptJson = true;
     }
 
     /// <summary>生成结果。</summary>
@@ -191,7 +198,7 @@ namespace CoffeeBean.Excel
                 {
                     EnsureFolder(options.OutputFolder);
                     string getterPath = Path.Combine(options.OutputFolder, group.Key + "Getter.cs");
-                    File.WriteAllText(getterPath, WriteChapterGetter(table, group.Key, group.Value, options.Namespace, options.ResourcesPath), new UTF8Encoding(false));
+                    File.WriteAllText(getterPath, WriteChapterGetter(table, group.Key, group.Value, options.Namespace, options.ResourcesPath, options.EncryptJson), new UTF8Encoding(false));
                     result.GeneratedFiles.Add(getterPath);
                 }
                 catch (Exception e)
@@ -234,10 +241,15 @@ namespace CoffeeBean.Excel
 
                 if (options.GenerateJson)
                 {
-                    // JSON 必须生成到 Resources 下，运行时 Resources.Load 才能读到
+                    // JSON 必须生成到 Resources 下，运行时 Resources.Load 才能读到；
+                    // EncryptJson 时写 XOR 密文字节（TextAsset.bytes 保留原始字节，运行时解密）
                     EnsureFolder(options.JsonResourcesFolder);
                     string jsonPath = Path.Combine(options.JsonResourcesFolder, className + ".json");
-                    File.WriteAllText(jsonPath, WriteJson(table), new UTF8Encoding(false));
+                    string jsonText = WriteJson(table);
+                    if (options.EncryptJson)
+                        File.WriteAllBytes(jsonPath, CExcelCrypto.Encode(jsonText));
+                    else
+                        File.WriteAllText(jsonPath, jsonText, new UTF8Encoding(false));
                     result.GeneratedFiles.Add(jsonPath);
                 }
 
@@ -255,7 +267,7 @@ namespace CoffeeBean.Excel
                         result.GeneratedFiles.Add(subPath);
 
                         string getterPath = Path.Combine(options.OutputFolder, sheetName + "Getter.cs");
-                        File.WriteAllText(getterPath, WriteGetter(table, sheetName, sheetName + "Config", options.Namespace, options.ResourcesPath), new UTF8Encoding(false));
+                        File.WriteAllText(getterPath, WriteGetter(table, sheetName, sheetName + "Config", options.Namespace, options.ResourcesPath, options.EncryptJson), new UTF8Encoding(false));
                         result.GeneratedFiles.Add(getterPath);
                     }
                     else
@@ -265,7 +277,7 @@ namespace CoffeeBean.Excel
                         result.GeneratedFiles.Add(classPath);
 
                         string getterPath = Path.Combine(options.OutputFolder, className + "Getter.cs");
-                        File.WriteAllText(getterPath, WriteGetter(table, className, className, options.Namespace, options.ResourcesPath), new UTF8Encoding(false));
+                        File.WriteAllText(getterPath, WriteGetter(table, className, className, options.Namespace, options.ResourcesPath, options.EncryptJson), new UTF8Encoding(false));
                         result.GeneratedFiles.Add(getterPath);
                     }
                 }
@@ -500,7 +512,8 @@ namespace CoffeeBean.Excel
         /// <param name="className">Getter 类名与 AssetPath（普通表 = 表名；章节 = sheet 名）。</param>
         /// <param name="dataType">数据类名（普通表 = 表名；章节 = 子类名，如 ChapterConfig_1Config）。</param>
         /// <param name="resourcesPath">Resources 相对路径（如 "Configs"）。</param>
-        private static string WriteGetter(CExcelTable table, string className, string dataType, string ns, string resourcesPath)
+        /// <param name="encrypt">JSON 是否加密（生成时决定，Getter 加载时对应解密）。</param>
+        private static string WriteGetter(CExcelTable table, string className, string dataType, string ns, string resourcesPath, bool encrypt)
         {
             CExcelFieldKind keyKind = table.Kinds[table.PrimaryKey];
             string keyType = CExcelTypeInfer.CSharpType(keyKind);
@@ -537,7 +550,10 @@ namespace CoffeeBean.Excel
             sb.AppendLine("        {");
             sb.AppendLine("            TextAsset asset = Resources.Load<TextAsset>(AssetPath);");
             sb.AppendLine("            if (asset == null) { Debug.LogError(\"Config missing: \" + AssetPath); return new List<" + dataType + ">(); }");
-            sb.AppendLine("            var wrapper = JsonUtility.FromJson<Wrapper>(asset.text);");
+            if (encrypt)
+                sb.AppendLine("            var wrapper = JsonUtility.FromJson<Wrapper>(Decode(asset.bytes));");
+            else
+                sb.AppendLine("            var wrapper = JsonUtility.FromJson<Wrapper>(asset.text);");
             sb.AppendLine("            return wrapper != null ? wrapper.data : new List<" + dataType + ">();");
             sb.AppendLine("        }");
             sb.AppendLine();
@@ -547,6 +563,7 @@ namespace CoffeeBean.Excel
             sb.AppendLine("            foreach (" + dataType + " item in All) index[item." + keyField + "] = item;");
             sb.AppendLine("            return index;");
             sb.AppendLine("        }");
+            if (encrypt) AppendDecryptMethods(sb);
             sb.AppendLine();
             sb.AppendLine("        [System.Serializable] private sealed class Wrapper { public List<" + dataType + "> data; }");
             sb.AppendLine("    }");
@@ -554,9 +571,36 @@ namespace CoffeeBean.Excel
             return sb.ToString();
         }
 
+        /// <summary>向生成代码追加解密方法（与生成端 CExcelCrypto 同种子同算法；仅 encrypt 时生成）。</summary>
+        private static void AppendDecryptMethods(StringBuilder sb)
+        {
+            sb.AppendLine();
+            sb.AppendLine("        private static string Decode(byte[] data)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            byte[] key = GenerateKey(data.Length);");
+            sb.AppendLine("            var result = new byte[data.Length];");
+            sb.AppendLine("            for (int i = 0; i < data.Length; i++)");
+            sb.AppendLine("                result[i] = (byte)(data[i] ^ key[i] ^ (byte)(i & 0x7F));");
+            sb.AppendLine("            return System.Text.Encoding.UTF8.GetString(result);");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        private static byte[] GenerateKey(int length)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            var key = new byte[length];");
+            sb.AppendLine("            uint state = 2166136261;");
+            sb.AppendLine("            for (int i = 0; i < length; i++)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                state ^= \"" + CExcelCrypto.KeySeed + "\"[i % " + CExcelCrypto.KeySeed.Length + "];");
+            sb.AppendLine("                state *= 16777619;");
+            sb.AppendLine("                key[i] = (byte)(state >> 24);");
+            sb.AppendLine("            }");
+            sb.AppendLine("            return key;");
+            sb.AppendLine("        }");
+        }
+
         // ========== 多章节：聚合 Getter ==========
 
-        private static string WriteChapterGetter(CExcelTable table, string frontName, List<int> chapters, string ns, string resourcesPath)
+        private static string WriteChapterGetter(CExcelTable table, string frontName, List<int> chapters, string ns, string resourcesPath, bool encrypt)
         {
             CExcelFieldKind keyKind = table.Kinds[table.PrimaryKey];
             string keyType = CExcelTypeInfer.CSharpType(keyKind);
@@ -619,12 +663,16 @@ namespace CoffeeBean.Excel
             sb.AppendLine("        {");
             sb.AppendLine("            TextAsset asset = Resources.Load<TextAsset>(\"" + assetPath + "\" + chapterId);");
             sb.AppendLine("            if (asset == null) { Debug.LogError(\"Config missing: " + assetPath + "\" + chapterId); return new List<T>(); }");
-            sb.AppendLine("            var wrapper = JsonUtility.FromJson<Wrapper<T>>(asset.text);");
+            if (encrypt)
+                sb.AppendLine("            var wrapper = JsonUtility.FromJson<Wrapper<T>>(Decode(asset.bytes));");
+            else
+                sb.AppendLine("            var wrapper = JsonUtility.FromJson<Wrapper<T>>(asset.text);");
             sb.AppendLine("            return wrapper != null ? wrapper.data : new List<T>();");
             sb.AppendLine("        }");
             sb.AppendLine();
             sb.AppendLine("        private static T Find<T>(List<T> rows, " + keyType + " key) where T : " + baseClass);
             sb.AppendLine("            => rows.FirstOrDefault(x => x." + keyField + " == key);");
+            if (encrypt) AppendDecryptMethods(sb);
             sb.AppendLine();
             sb.AppendLine("        [System.Serializable] private sealed class Wrapper<T> { public List<T> data; }");
             sb.AppendLine("    }");

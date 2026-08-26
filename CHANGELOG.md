@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.4] - 2025-xx-xx
+
+### Added
+- **配置 JSON 混淆加密**（对齐 Idle 项目的 GetSimpleEncyptString 做法）：生成选项 `EncryptJson`（默认 true），
+  生成的 JSON 写 XOR 密文字节（`CExcelCrypto`，确定性 key 流），打包产物里配置不再是明文
+- Getter 模板内嵌解密逻辑（`Decode(asset.bytes)`），运行时透明解密，业务无感知
+- 窗口新增"加密 JSON"开关（EditorPrefs 记忆；调试时可关闭直接查看 JSON）
+
+### Notes
+- **安全边界**：这是混淆级保护（key 硬编码在生成代码里，防普通读取 / 防小白，不防专业逆向）；
+  真正的安全需服务器下发配置 / AssetBundle 加密 / 代码混淆。客户端资源永远无法真正防提取。
+- 关闭加密会改变既有密文产物的读取方式（Getter 模板随之不含解密），重新生成即可
+
 ## [0.1.3] - 2025-xx-xx
 
 ### Fixed

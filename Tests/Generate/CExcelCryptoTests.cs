@@ -1,0 +1,120 @@
+using System;
+using System.IO;
+using System.Text;
+using NUnit.Framework;
+using UnityEngine;
+
+namespace CoffeeBean.Excel.Tests
+{
+    /// <summary>配置 JSON 加密测试：编解码往返 / 密文不可读 / 生成器加密输出 / Getter 含解密。</summary>
+    public class CExcelCryptoTests
+    {
+        private string _tmpXlsx;
+        private string _tmpOut;
+
+        [SetUp]
+        public void SetUp()
+        {
+            _tmpXlsx = CExcelTestFactory.CreateTempTable(new[]
+            {
+                CExcelTestFactory.Row("Id_i", 1, "Name_s", "新手礼包", "Price_f", 6.5),
+            }, "crypto_test");
+            _tmpOut = Path.Combine(Path.GetTempPath(), "coffeebean_crypto_out_" + Guid.NewGuid().ToString("N"));
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            CExcelTestFactory.DeleteTempFile(_tmpXlsx);
+            if (Directory.Exists(_tmpOut)) Directory.Delete(_tmpOut, true);
+        }
+
+        [Test]
+        public void EncodeDecode_RoundTrip_WithChinese()
+        {
+            string plain = "{\"data\":[{\"Id\":1,\"Name\":\"新手礼包\"}]}";
+            byte[] cipher = CExcelCrypto.Encode(plain);
+
+            Assert.AreNotEqual(plain, Encoding.UTF8.GetString(cipher), "密文不应等于明文");
+            StringAssert.DoesNotContain("新手礼包", Encoding.UTF8.GetString(cipher), "密文中不应出现明文中文");
+
+            string decoded = CExcelCrypto.Decode(cipher);
+            Assert.AreEqual(plain, decoded, "解密应还原明文");
+        }
+
+        [Test]
+        public void EncodeDecode_RoundTrip_Deterministic()
+        {
+            string plain = "{\"data\":[]}";
+            byte[] c1 = CExcelCrypto.Encode(plain);
+            byte[] c2 = CExcelCrypto.Encode(plain);
+
+            CollectionAssert.AreEqual(c1, c2, "同一明文加密结果应确定（生成端与运行时一致）");
+        }
+
+        [Test]
+        public void Generate_EncryptJson_ProducesCipherText()
+        {
+            var options = new CExcelGenerateOptions
+            {
+                OutputFolder = _tmpOut,
+                ClassName = "CryptoTable",
+                JsonResourcesFolder = _tmpOut + "/Resources",
+                ResourcesPath = "Configs",
+                EncryptJson = true,
+            };
+            CExcelGenerateResult result = CExcelGenerator.Generate(_tmpXlsx, options);
+            Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
+
+            string jsonPath = Path.Combine(_tmpOut, "Resources", "CryptoTable.json");
+            byte[] cipher = File.ReadAllBytes(jsonPath);
+            Assert.IsFalse(ContainsAscii(cipher, "新手礼包"), "加密后的 JSON 不应包含明文数据");
+            Assert.IsFalse(ContainsAscii(cipher, "data"), "加密后的 JSON 不应包含明文结构标记");
+
+            // 解密后应还原为合法 JSON（含中文数据）
+            string decoded = CExcelCrypto.Decode(cipher);
+            StringAssert.Contains("新手礼包", decoded);
+            StringAssert.Contains("\"Id\"", decoded);
+
+            // Getter 应内嵌解密逻辑
+            string getter = File.ReadAllText(Path.Combine(_tmpOut, "CryptoTableGetter.cs"));
+            StringAssert.Contains("Decode(asset.bytes)", getter);
+            StringAssert.Contains("private static string Decode(byte[] data)", getter);
+        }
+
+        [Test]
+        public void Generate_EncryptOff_WritesPlainText()
+        {
+            var options = new CExcelGenerateOptions
+            {
+                OutputFolder = _tmpOut,
+                ClassName = "PlainTable",
+                JsonResourcesFolder = _tmpOut + "/Resources",
+                EncryptJson = false,
+            };
+            CExcelGenerator.Generate(_tmpXlsx, options);
+
+            string json = File.ReadAllText(Path.Combine(_tmpOut, "Resources", "PlainTable.json"));
+            StringAssert.Contains("新手礼包", json, "关闭加密时 JSON 应为明文");
+
+            string getter = File.ReadAllText(Path.Combine(_tmpOut, "PlainTableGetter.cs"));
+            StringAssert.Contains("asset.text", getter);
+            Assert.IsFalse(getter.Contains("Decode(asset.bytes)"), "关闭加密时 Getter 不应含解密逻辑");
+        }
+
+        private static bool ContainsAscii(byte[] data, string text)
+        {
+            byte[] needle = Encoding.UTF8.GetBytes(text);
+            for (int i = 0; i + needle.Length <= data.Length; i++)
+            {
+                bool match = true;
+                for (int j = 0; j < needle.Length; j++)
+                {
+                    if (data[i + j] != needle[j]) { match = false; break; }
+                }
+                if (match) return true;
+            }
+            return false;
+        }
+    }
+}

@@ -27,6 +27,7 @@ namespace CoffeeBean.Excel
         private string _primaryKey = string.Empty;
         private bool _generateJson = true;
         private bool _generateClass = true;
+        private bool _encryptJson = true;
 
         private readonly List<FileStatus> _files = new List<FileStatus>();
         private Vector2 _scroll;
@@ -96,6 +97,7 @@ namespace CoffeeBean.Excel
             EditorGUILayout.BeginHorizontal();
             _generateJson = EditorGUILayout.Toggle("生成 JSON", _generateJson);
             _generateClass = EditorGUILayout.Toggle("生成 C# 类 + Getter", _generateClass);
+            _encryptJson = EditorGUILayout.Toggle("加密 JSON", _encryptJson);
             EditorGUILayout.EndHorizontal();
             if (GUILayout.Button("保存选项", GUILayout.Height(22)))
             {
@@ -104,6 +106,7 @@ namespace CoffeeBean.Excel
                 EditorPrefs.SetString(PrefNamespace, _namespace);
                 EditorPrefs.SetString(PrefJsonResources, _jsonResourcesFolder);
                 EditorPrefs.SetString(PrefResourcesPath, _resourcesPath);
+                EditorPrefs.SetBool("CoffeeBean.Excel.EncryptJson", _encryptJson);
             }
 
             // 表状态列表
@@ -165,6 +168,7 @@ namespace CoffeeBean.Excel
                 GenerateClass = _generateClass,
                 JsonResourcesFolder = _jsonResourcesFolder,
                 ResourcesPath = _resourcesPath,
+                EncryptJson = _encryptJson,
             };
 
             int generated = 0, skipped = 0, failed = 0;
