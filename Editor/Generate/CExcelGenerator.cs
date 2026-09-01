@@ -283,12 +283,54 @@ namespace CoffeeBean
                 }
 
                 result.Success = true;
+                // 确保生成代码所在目录有独立 asmdef（程序集级增量编译隔离：
+                // 改配置表只重编译生成程序集，业务代码不重编译，加快迭代编译）
+                EnsureGeneratedAsmdef(options.OutputFolder, options.Namespace);
                 return result;
             }
             catch (Exception e)
             {
                 result.Issues.Add(new CExcelIssue { Level = CExcelIssueLevel.Error, Row = 0, Column = "-", Message = "生成失败: " + e.Message });
                 return result;
+            }
+        }
+
+        /// <summary>
+        /// 在生成代码目录创建独立 asmdef（幂等：已存在不覆盖）。
+        /// 程序集名 = {Namespace}.Generated；生成的表类/Getter 归入该程序集，
+        /// 与业务代码隔离——之后改配置表只重编译生成程序集（小、快），业务程序集不参与。
+        /// </summary>
+        internal static void EnsureGeneratedAsmdef(string outputFolder, string ns)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(outputFolder)) return;
+                EnsureFolder(outputFolder);
+
+                string assemblyName = (string.IsNullOrEmpty(ns) ? "Config" : ns) + ".Generated";
+                string asmdefPath = Path.Combine(outputFolder, assemblyName + ".asmdef");
+                if (File.Exists(asmdefPath)) return; // 已存在不覆盖（避免用户定制被覆盖）
+
+                string json = "{\n" +
+                              "  \"name\": \"" + assemblyName + "\",\n" +
+                              "  \"rootNamespace\": \"" + (string.IsNullOrEmpty(ns) ? "Config" : ns) + "\",\n" +
+                              "  \"references\": [],\n" +
+                              "  \"includePlatforms\": [],\n" +
+                              "  \"excludePlatforms\": [],\n" +
+                              "  \"allowUnsafeCode\": false,\n" +
+                              "  \"overrideReferences\": false,\n" +
+                              "  \"precompiledReferences\": [],\n" +
+                              "  \"autoReferenced\": true,\n" +
+                              "  \"defineConstraints\": [],\n" +
+                              "  \"versionDefines\": [],\n" +
+                              "  \"noEngineReferences\": false\n" +
+                              "}\n";
+                File.WriteAllText(asmdefPath, json, new UTF8Encoding(false));
+            }
+            catch (Exception e)
+            {
+                // asmdef 生成失败不阻断主流程（只是编译优化），记录警告
+                UnityEngine.Debug.LogWarning("[CoffeeBean.Excel] 生成独立 asmdef 失败（不影响生成产物）: " + e.Message);
             }
         }
 

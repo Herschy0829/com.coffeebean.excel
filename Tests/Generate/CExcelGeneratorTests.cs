@@ -57,6 +57,44 @@ namespace CoffeeBean.Excel.Tests
         }
 
         [Test]
+        public void Generate_CreatesIsolatedAsmdef()
+        {
+            Generate("TestTable");
+
+            // 生成代码目录应有独立 asmdef（程序集级增量编译隔离）
+            string asmdefPath = Path.Combine(_tmpOut, "Config.Generated.asmdef");
+            Assert.IsTrue(File.Exists(asmdefPath), "应生成独立 asmdef 隔离生成代码");
+            string json = File.ReadAllText(asmdefPath);
+            Assert.IsTrue(json.Contains("\"Config.Generated\""), "asmdef 名称应为 Config.Generated");
+            Assert.IsTrue(json.Contains("\"rootNamespace\": \"Config\""), "rootNamespace 应为生成代码命名空间");
+            Assert.IsTrue(json.Contains("\"autoReferenced\": true"), "应 autoReferenced 供业务代码直接引用");
+        }
+
+        [Test]
+        public void Generate_CustomNamespace_AsmdefNameFollows()
+        {
+            Generate("TestTable", ns: "MyGame.Config");
+
+            string asmdefPath = Path.Combine(_tmpOut, "MyGame.Config.Generated.asmdef");
+            Assert.IsTrue(File.Exists(asmdefPath), "asmdef 名称应跟随命名空间");
+            string json = File.ReadAllText(asmdefPath);
+            Assert.IsTrue(json.Contains("\"MyGame.Config.Generated\""), "asmdef 名称应为 MyGame.Config.Generated");
+        }
+
+        [Test]
+        public void EnsureAsmdef_IsIdempotent()
+        {
+            // 手动放一个自定义 asmdef，验证生成不覆盖
+            string customPath = Path.Combine(_tmpOut, "Config.Generated.asmdef");
+            Directory.CreateDirectory(_tmpOut);
+            File.WriteAllText(customPath, "custom", new System.Text.UTF8Encoding(false));
+
+            CExcelGenerator.EnsureGeneratedAsmdef(_tmpOut, "Config");
+
+            Assert.AreEqual("custom", File.ReadAllText(customPath), "已存在的 asmdef 不应被覆盖");
+        }
+
+        [Test]
         public void Generate_Getter_AssetPath_MatchesResourcesPath()
         {
             Generate("TestTable");

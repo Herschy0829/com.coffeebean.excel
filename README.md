@@ -93,6 +93,11 @@ var cfg = ChapterConfigGetter.Get(1);    // 按主键查询（默认第一个 *_
 → JsonUtility 反序列化 `{"data":[...]}` 包装。**JSON 必须生成在 Resources 目录下**（生成器默认直接写入
 `Assets/Resources/Configs/`，与 Getter 的 AssetPath 对齐，无需手动拷贝）。
 
+**生成代码独立程序集（v0.2.2）**：生成时自动在代码输出目录创建 `{Namespace}.Generated.asmdef`
+（如 `Config.Generated`，幂等：已存在不覆盖）——生成的表类/Getter 归入**独立程序集**，
+与业务代码隔离。之后**改配置表只重编译生成程序集**（小、快），业务代码不重编译，加快迭代编译速度。
+比预编译 dll 更简单可靠（仍为源码、天然兼容 IL2CPP / 调试 / 版本管理）。业务代码 `using Config;` 直接使用。
+
 **JSON 加密（默认开启）**：生成选项 `EncryptJson = true` 时，JSON 以 XOR 密文字节写入（`CExcelCrypto`，
 对齐 Idle 项目的简单加密），Getter 运行时透明解密。打包产物里的配置不是明文，防普通读取。
 > ⚠️ 这是**混淆级**保护（key 在生成代码里，不防专业逆向）；真正安全需服务器下发 / AB 加密 / 代码混淆。
