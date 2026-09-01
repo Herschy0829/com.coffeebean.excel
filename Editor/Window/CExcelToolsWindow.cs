@@ -2,15 +2,17 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using CoffeeBean.EditorTools;
 
 namespace CoffeeBean
 {
     /// <summary>
-    /// Excel 配置表工具主窗口（Window &gt; CoffeeBean &gt; Excel Tools）：
+    /// Excel 配置表工具主窗口（入口：Window &gt; CoffeeBean &gt; Excel Tools 收敛到 CoffeeBean Hub）：
     /// **文件夹批量生成**为主界面——选择一次文件夹（EditorPrefs 记忆）后一键增量生成；
     /// 单文件校验 / 预览在二级窗口（<see cref="CExcelFileWindow"/>，列表行"预览"按钮打开）。
     /// 增量：只重新生成修改过的表（<see cref="CExcelIncrementalGenerator"/> 记录文件修改时间）。
     /// </summary>
+    [CoffeeBeanTool("Excel 配置表工具", "文件夹批量生成 / 单表校验预览 / 增量生成（C# 类 + JSON）", "Excel")]
     public sealed class CExcelToolsWindow : EditorWindow
     {
         private const string PrefFolder = "CoffeeBean.Excel.Folder";
@@ -41,7 +43,7 @@ namespace CoffeeBean
             public string Detail = "";
         }
 
-        [MenuItem("Window/CoffeeBean/Excel Tools")]
+        // 入口统一收敛到 CoffeeBean Hub（Window > CoffeeBean），不再单独注册菜单项
         public static void Open() => GetWindow<CExcelToolsWindow>("Excel Tools");
 
         private void OnEnable()

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1] - 2026-08-28
+
+### Changed
+- **工具入口收敛到 CoffeeBean Hub**：Excel 工具窗口加 CoffeeBeanToolAttribute 标记（模块内复制同名定义，无需依赖 core），由 Window > CoffeeBean 统一发现打开；移除独立菜单项
+
+# Changelog
+
 ## [0.2.0] - 2025-xx-xx
 
 ### Changed
