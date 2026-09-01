@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3] - 2026-08-28
+
+### Changed
+- **生成代码默认命名空间改为 `CoffeeBean` 根命名空间**：生成的表类/Getter 进 `CoffeeBean`，
+  业务只需 `using CoffeeBean;` 即可访问（含框架所有模块主类型 + 配置表）
+- **破坏性变更**：旧工程已生成代码是 `Config` 命名空间——升级后需在生成窗口把命名空间改回
+  `CoffeeBean`（或保持 `Config`）并重新生成一次；`using Config;` 的旧代码需相应调整
+
 ## [0.2.2] - 2026-08-28
 
 ### Added

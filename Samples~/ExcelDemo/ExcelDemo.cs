@@ -45,7 +45,7 @@ namespace CoffeeBean.Excel.Demo
             var options = new CExcelGenerateOptions
             {
                 OutputFolder = DemoFolder + "/Generated",
-                Namespace = "Config",
+                Namespace = "CoffeeBean", // 统一命名空间：using CoffeeBean; 即可访问生成的表类
             };
             CExcelGenerateResult result = CExcelGenerator.Generate(xlsxPath, options);
             if (result.Success)

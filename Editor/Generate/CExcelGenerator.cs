@@ -13,8 +13,8 @@ namespace CoffeeBean
         /// <summary>输出目录（相对 Assets 或绝对路径）。</summary>
         public string OutputFolder = "Assets/Configs/Generated";
 
-        /// <summary>生成类 / Getter 的命名空间。</summary>
-        public string Namespace = "Config";
+        /// <summary>生成类 / Getter 的命名空间（默认 CoffeeBean 根命名空间，`using CoffeeBean;` 即可访问）。</summary>
+        public string Namespace = "CoffeeBean";
 
         /// <summary>类名（默认取表名/sheet 名）。</summary>
         public string ClassName;
@@ -217,6 +217,9 @@ namespace CoffeeBean
         private static CExcelGenerateResult GenerateSheet(string excelPath, string sheetName, CExcelGenerateOptions options)
         {
             var result = new CExcelGenerateResult();
+            options = options ?? new CExcelGenerateOptions();
+            // 命名空间回退默认值（避免 null/空导致生成非法代码）
+            if (string.IsNullOrEmpty(options.Namespace)) options.Namespace = "CoffeeBean";
 
             CExcelReadResult read = CExcelReader.Read(excelPath, new CExcelReadOptions { SheetName = sheetName });
             if (read.HasBlockingErrors)
@@ -307,13 +310,14 @@ namespace CoffeeBean
                 if (string.IsNullOrEmpty(outputFolder)) return;
                 EnsureFolder(outputFolder);
 
-                string assemblyName = (string.IsNullOrEmpty(ns) ? "Config" : ns) + ".Generated";
+                string effectiveNs = string.IsNullOrEmpty(ns) ? "CoffeeBean" : ns;
+                string assemblyName = effectiveNs + ".Generated";
                 string asmdefPath = Path.Combine(outputFolder, assemblyName + ".asmdef");
                 if (File.Exists(asmdefPath)) return; // 已存在不覆盖（避免用户定制被覆盖）
 
                 string json = "{\n" +
                               "  \"name\": \"" + assemblyName + "\",\n" +
-                              "  \"rootNamespace\": \"" + (string.IsNullOrEmpty(ns) ? "Config" : ns) + "\",\n" +
+                              "  \"rootNamespace\": \"" + effectiveNs + "\",\n" +
                               "  \"references\": [],\n" +
                               "  \"includePlatforms\": [],\n" +
                               "  \"excludePlatforms\": [],\n" +

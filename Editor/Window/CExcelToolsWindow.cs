@@ -23,7 +23,7 @@ namespace CoffeeBean
 
         private string _folder;
         private string _outputFolder = "Assets/Configs/Generated";
-        private string _namespace = "Config";
+        private string _namespace = "CoffeeBean";
         private string _jsonResourcesFolder = "Assets/Resources/Configs";
         private string _resourcesPath = "Configs";
         private string _primaryKey = string.Empty;
@@ -50,7 +50,7 @@ namespace CoffeeBean
         {
             _folder = EditorPrefs.GetString(PrefFolder, string.Empty);
             _outputFolder = EditorPrefs.GetString(PrefOutputFolder, "Assets/Configs/Generated");
-            _namespace = EditorPrefs.GetString(PrefNamespace, "Config");
+            _namespace = EditorPrefs.GetString(PrefNamespace, "CoffeeBean");
             _jsonResourcesFolder = EditorPrefs.GetString(PrefJsonResources, "Assets/Resources/Configs");
             _resourcesPath = EditorPrefs.GetString(PrefResourcesPath, "Configs");
             RefreshFileList();

@@ -40,12 +40,13 @@ CoffeeBean 框架的 **Excel 配置表工具模块**（Editor-only）：读取 �
 ### 2. 生成三件套
 
 ```csharp
-using CoffeeBean.Excel;
+using CoffeeBean;   // 统一命名空间：CExcelGenerateOptions / 生成的表类都在 CoffeeBean 下
 
 var options = new CExcelGenerateOptions
 {
     OutputFolder = "Assets/Configs/Generated",
-    Namespace = "Config",
+    // Namespace 默认 "CoffeeBean"（统一命名空间：using CoffeeBean; 即可访问生成的表类）；
+    // 需要隔离可改成子命名空间（如 "CoffeeBean.Config"，访问时 using CoffeeBean.Config;）
 };
 CExcelGenerateResult result = CExcelGenerator.Generate("Assets/Excel/ChapterConfig.xlsx", options);
 // 或批量（全 sheet）：
@@ -56,6 +57,7 @@ CExcelGenerateResult all = CExcelGenerator.GenerateAllSheets("Assets/Excel/Chapt
 - `ChapterConfig.json` —— 表数据（`{"data":[...]}`，运行时 Resources 加载）
 - `ChapterConfig.cs` —— 强类型数据类（`Id` / `Name` / `Price` / `Rewards`）
 - `ChapterConfigGetter.cs` —— 加载器
+- `CoffeeBean.Generated.asmdef` —— 生成代码独立程序集（v0.2.2，程序集级增量编译隔离）
 
 ### 3. 多 Sheet 与分章节（对齐项目约定）
 
@@ -84,6 +86,8 @@ ChapterConfigGetter.Chapter1;                     // 第一章强类型 List
 ### 5. 运行时读取
 
 ```csharp
+using CoffeeBean;  // 生成类在 CoffeeBean 命名空间（默认），using 一次即可
+
 // JSON 生成在 Resources/Configs/ 下（生成选项 JsonResourcesFolder，默认 Assets/Resources/Configs）
 var all = ChapterConfigGetter.All;       // List<ChapterConfig>（懒加载）
 var cfg = ChapterConfigGetter.Get(1);    // 按主键查询（默认第一个 *_i/_l/_s 列）
@@ -94,7 +98,7 @@ var cfg = ChapterConfigGetter.Get(1);    // 按主键查询（默认第一个 *_
 `Assets/Resources/Configs/`，与 Getter 的 AssetPath 对齐，无需手动拷贝）。
 
 **生成代码独立程序集（v0.2.2）**：生成时自动在代码输出目录创建 `{Namespace}.Generated.asmdef`
-（如 `Config.Generated`，幂等：已存在不覆盖）——生成的表类/Getter 归入**独立程序集**，
+（默认 `CoffeeBean.Generated`，幂等：已存在不覆盖）——生成的表类/Getter 归入**独立程序集**，
 与业务代码隔离。之后**改配置表只重编译生成程序集**（小、快），业务代码不重编译，加快迭代编译速度。
 比预编译 dll 更简单可靠（仍为源码、天然兼容 IL2CPP / 调试 / 版本管理）。业务代码 `using Config;` 直接使用。
 

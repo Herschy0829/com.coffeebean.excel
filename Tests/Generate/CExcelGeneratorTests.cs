@@ -71,6 +71,30 @@ namespace CoffeeBean.Excel.Tests
         }
 
         [Test]
+        public void Generate_DefaultNamespace_IsCoffeeBean()
+        {
+            // 默认命名空间应为 CoffeeBean 根命名空间（using CoffeeBean; 即可访问生成类）
+            var options = new CExcelGenerateOptions
+            {
+                OutputFolder = _tmpOut,
+                ClassName = "TestTable",
+                JsonResourcesFolder = _tmpOut + "/Resources",
+                ResourcesPath = "Configs",
+                EncryptJson = false,
+                Namespace = null, // 不传 → 用默认值
+            };
+            CExcelGenerateResult result = CExcelGenerator.Generate(_tmpXlsx, options);
+            Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
+
+            string classContent = File.ReadAllText(Path.Combine(_tmpOut, "TestTable.cs"));
+            Assert.IsTrue(classContent.Contains("namespace CoffeeBean"), "默认命名空间应为 CoffeeBean");
+
+            // asmdef 也应跟随默认命名空间
+            string asmdefPath = Path.Combine(_tmpOut, "CoffeeBean.Generated.asmdef");
+            Assert.IsTrue(File.Exists(asmdefPath), "asmdef 名称应跟随默认命名空间 CoffeeBean");
+        }
+
+        [Test]
         public void Generate_CustomNamespace_AsmdefNameFollows()
         {
             Generate("TestTable", ns: "MyGame.Config");
