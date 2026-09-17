@@ -1,0 +1,20 @@
+{
+  "name": "CoffeeBean.Excel.Bridge",
+  "rootNamespace": "CoffeeBean",
+  "references": [
+    "CoffeeBean.Core"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "COFFEEBEAN_CORE"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0] - 2026-09-17
+
+### Added
+- **模块标记 `[assembly: CoffeeBeanModule]`**，让 Core 能发现 excel 并纳入依赖图与版本兼容校验。
+  此前 excel 既没有 `Runtime/` 也没有模块标记，`CoffeeBeanRegistry.Scan()` 扫不到它 ——
+  在 `Window > CoffeeBean` 里看不到该模块，Core 的 `MinCoreVersion` 校验也覆盖不到它。
+
+### 说明（为什么用 Editor-only 的 Bridge 程序集）
+- 新增 `Runtime/Bridge/CoffeeBean.Excel.Bridge.asmdef` + `Bridge.cs`，
+  与其它模块的 Bridge 一样受 `COFFEEBEAN_CORE` 约束（装了 Core 才编译），
+  但**额外限定 `includePlatforms: ["Editor"]`** —— 与本包「Editor-only 配置表工具链」的定位一致：
+  包里除 `Editor/` 外没有任何运行期代码，若把标记放进运行期程序集，
+  玩家包体会白带一个什么都不做的 DLL。
+- 结果：编辑器内 Module Manager 可见、版本可校验；玩家包体不含任何 excel 代码。
+- 声明 `Dependencies = ["com.coffeebean.core"]`（标记本身就在 Core 存在时才编译）。
+
 ## [0.2.3] - 2026-08-28
 
 ### Changed
