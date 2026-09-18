@@ -1,6 +1,6 @@
 {
   "name": "com.coffeebean.excel",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "displayName": "CoffeeBean Excel",
   "description": "Editor-only config-table toolchain for the CoffeeBean framework: Excel reading (MiniExcel) with header detection and aliases, type inference, and generation of JSON + C# data classes + getters. Editor-only, no runtime code; optionally integrated with com.coffeebean.core for module discovery and version checks.",
   "unity": "6000.0",

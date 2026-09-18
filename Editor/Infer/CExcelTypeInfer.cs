@@ -25,8 +25,8 @@ namespace CoffeeBean
     /// <summary>
     /// 列类型推断：
     ///
-    /// 1. **列名后缀显式声明**（对齐 purchase 表与项目约定）：
-    ///    _i=int _l=long _f=float _d=double _b=bool _s=string；
+    /// 1. **列名后缀显式声明**（对齐 purchase 表与项目约定）：见 <see cref="CExcelTypeCatalog"/> ——
+    ///    后缀表、C# 类型、单元格写法示例**只有那一份数据源**，本类只负责按它匹配；
     ///    数组加 a：_ia=int[] _sa=string[] ...；无后缀 → 按值推断
     /// 2. **无后缀兜底推断**：全整数 → int；超 int 范围 → long；含小数 → double；
     ///    全布尔字面量（true/false/1/0）→ bool；否则 string
@@ -34,14 +34,7 @@ namespace CoffeeBean
     /// </summary>
     public static class CExcelTypeInfer
     {
-        private const string SuffixInt = "_i";
-        private const string SuffixLong = "_l";
-        private const string SuffixFloat = "_f";
-        private const string SuffixDouble = "_d";
-        private const string SuffixBool = "_b";
-        private const string SuffixString = "_s";
-
-        /// <summary>是否带类型后缀（_i/_l/_f/_d/_b/_s 或数组变体 _ia/_la/...）。</summary>
+        /// <summary>是否带类型后缀（见 <see cref="CExcelTypeCatalog"/>）。</summary>
         public static bool IsSuffixed(string columnName)
         {
             if (string.IsNullOrEmpty(columnName)) return false;
@@ -50,26 +43,7 @@ namespace CoffeeBean
 
         /// <summary>按列名后缀解析类型；无后缀返回 null。</summary>
         public static CExcelFieldKind? FromSuffix(string columnName)
-        {
-            if (string.IsNullOrEmpty(columnName)) return null;
-            string lower = columnName.ToLowerInvariant();
-
-            if (lower.EndsWith(SuffixInt, StringComparison.Ordinal)) return CExcelFieldKind.Int;
-            if (lower.EndsWith(SuffixLong, StringComparison.Ordinal)) return CExcelFieldKind.Long;
-            if (lower.EndsWith(SuffixFloat, StringComparison.Ordinal)) return CExcelFieldKind.Float;
-            if (lower.EndsWith(SuffixDouble, StringComparison.Ordinal)) return CExcelFieldKind.Double;
-            if (lower.EndsWith(SuffixBool, StringComparison.Ordinal)) return CExcelFieldKind.Bool;
-            if (lower.EndsWith(SuffixString, StringComparison.Ordinal)) return CExcelFieldKind.String;
-
-            if (lower.EndsWith("_ia", StringComparison.Ordinal)) return CExcelFieldKind.IntArray;
-            if (lower.EndsWith("_la", StringComparison.Ordinal)) return CExcelFieldKind.LongArray;
-            if (lower.EndsWith("_fa", StringComparison.Ordinal)) return CExcelFieldKind.FloatArray;
-            if (lower.EndsWith("_da", StringComparison.Ordinal)) return CExcelFieldKind.DoubleArray;
-            if (lower.EndsWith("_ba", StringComparison.Ordinal)) return CExcelFieldKind.BoolArray;
-            if (lower.EndsWith("_sa", StringComparison.Ordinal)) return CExcelFieldKind.StringArray;
-
-            return null;
-        }
+            => CExcelTypeCatalog.BySuffix(columnName);
 
         /// <summary>
         /// 推断列类型：后缀优先；无后缀按该列全部非空值推断；空列 → String。
@@ -120,27 +94,16 @@ namespace CoffeeBean
         public static CExcelFieldKind ElementKind(CExcelFieldKind arrayKind)
             => (CExcelFieldKind)((int)arrayKind - (int)CExcelFieldKind.IntArray);
 
-        /// <summary>对应 C# 类型名（int/long/float/double/bool/string，数组加 []）。</summary>
+        /// <summary>对应 C# 类型名（见 <see cref="CExcelTypeCatalog"/>；数组加 []）。</summary>
         public static string CSharpType(CExcelFieldKind kind)
         {
-            bool isArray = IsArray(kind);
-            string baseType = isArray ? CSharpType(ElementKind(kind)) : null;
-            switch (kind)
+            if (IsArray(kind))
             {
-                case CExcelFieldKind.Int:
-                case CExcelFieldKind.IntArray: baseType = "int"; break;
-                case CExcelFieldKind.Long:
-                case CExcelFieldKind.LongArray: baseType = "long"; break;
-                case CExcelFieldKind.Float:
-                case CExcelFieldKind.FloatArray: baseType = "float"; break;
-                case CExcelFieldKind.Double:
-                case CExcelFieldKind.DoubleArray: baseType = "double"; break;
-                case CExcelFieldKind.Bool:
-                case CExcelFieldKind.BoolArray: baseType = "bool"; break;
-                case CExcelFieldKind.String:
-                case CExcelFieldKind.StringArray: baseType = "string"; break;
+                CExcelTypeSpec element = CExcelTypeCatalog.Find(ElementKind(kind));
+                if (element != null) return element.CSharpType + "[]";
             }
-            return isArray ? baseType + "[]" : baseType;
+            CExcelTypeSpec spec = CExcelTypeCatalog.Find(kind);
+            return spec != null ? spec.CSharpType : kind.ToString();
         }
 
         /// <summary>规范列名 → 字段名（去类型后缀，下划线转 PascalCase，首字母大写）。</summary>
@@ -172,7 +135,7 @@ namespace CoffeeBean
         }
 
         private static int SuffixLength(CExcelFieldKind kind)
-            => IsArray(kind) ? 3 : 2;
+            => CExcelTypeCatalog.SuffixLength(kind);
 
         /// <summary>解析数组值（分隔符 ; 或 ,，支持中文 ；）。返回元素文本列表。</summary>
         public static List<string> SplitArrayValue(string text)
