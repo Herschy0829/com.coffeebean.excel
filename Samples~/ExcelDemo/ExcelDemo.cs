@@ -41,18 +41,19 @@ namespace CoffeeBean.Excel.Demo
                 return;
             }
 
-            // 3. 生成三件套（普通表：JSON + 数据类 + Getter）
+            // 3. 生成产物（代码 → 内嵌包；数据 → 同包的 <表>/Data 下，Assets 不参与）
             var options = new CExcelGenerateOptions
             {
-                OutputFolder = DemoFolder + "/Generated",
+                CodeFolder = "Packages/com.coffeebean.excel.demo.generated",
+                PackageName = "com.coffeebean.excel.demo.generated",
                 Namespace = "CoffeeBean", // 统一命名空间：using CoffeeBean; 即可访问生成的表类
             };
             CExcelGenerateResult result = CExcelGenerator.Generate(xlsxPath, options);
             if (result.Success)
             {
-                AssetDatabase.Refresh();
                 Debug.Log("[ExcelDemo] 生成完成:\n" + string.Join("\n", result.GeneratedFiles));
-                Debug.Log("[ExcelDemo] 生成的 Getter 用法：ChapterConfigGetter.Get(1) / ChapterConfigGetter.All");
+                Debug.Log("[ExcelDemo] 生成的 Getter 用法：ChapterConfigGetter.Get(1) / ChapterConfigGetter.All" +
+                          "（运行时先跑一次 ConfigTableRuntime.PreloadAll() 协程）");
             }
             else
             {

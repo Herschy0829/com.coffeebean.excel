@@ -67,5 +67,33 @@ namespace CoffeeBean
         {
             if (path != null && File.Exists(path)) File.Delete(path);
         }
+
+        // ========== 产物定位与解码（0.6.0 新布局：一表一文件夹 Code/ + Data/） ==========
+
+        /// <summary>测试用：构造"生成到临时包目录"的选项（数据默认压缩 + 加密，走真实链路）。</summary>
+        public static CExcelGenerateOptions TempPackageOptions(string tmpRoot, string ns = "CoffeeBean")
+            => new CExcelGenerateOptions
+            {
+                CodeFolder = Path.Combine(tmpRoot, "Package"),
+                PackageName = "com.coffeebean.test.generated",
+                Namespace = ns,
+            };
+
+        /// <summary>测试用：代码文件路径 &lt;代码包&gt;/&lt;表&gt;/Code/&lt;文件名&gt;。</summary>
+        public static string CodePath(CExcelGenerateOptions options, string tableFolder, string fileName)
+            => Path.Combine(options.CodeFolder, tableFolder, "Code", fileName);
+
+        /// <summary>测试用：数据文件路径 &lt;代码包&gt;/&lt;表&gt;/Data/&lt;数据名&gt;.cbcfg。</summary>
+        public static string DataPath(CExcelGenerateOptions options, string tableFolder, string dataName)
+            => Path.Combine(options.CodeFolder, tableFolder, "Data", dataName + CExcelDataContainer.Extension);
+
+        /// <summary>测试用：读 + 解容器，返回 JSON 文本（解不开直接抛，失败信息比断言更可读）。</summary>
+        public static string ReadDataJson(string dataPath)
+        {
+            if (!File.Exists(dataPath)) throw new FileNotFoundException("数据文件不存在: " + dataPath, dataPath);
+            string json = CExcelDataContainer.Decode(File.ReadAllBytes(dataPath), out string error);
+            if (json == null) throw new InvalidOperationException("容器解码失败(" + dataPath + "): " + error);
+            return json;
+        }
     }
 }

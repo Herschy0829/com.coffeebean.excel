@@ -122,12 +122,12 @@ namespace CoffeeBean
         private static CExcelGenerateOptions BuildOptions(string sheetName = null)
             => new CExcelGenerateOptions
             {
-                OutputFolder = EditorPrefs.GetString("CoffeeBean.Excel.OutputFolder", "Assets/Configs/Generated"),
+                CodeFolder = EditorPrefs.GetString("CoffeeBean.Excel.CodeFolder", "Packages/com.coffeebean.config.generated"),
+                PackageName = EditorPrefs.GetString("CoffeeBean.Excel.PackageName", "com.coffeebean.config.generated"),
                 Namespace = EditorPrefs.GetString("CoffeeBean.Excel.Namespace", "CoffeeBean"),
                 SheetName = sheetName,
-                JsonResourcesFolder = EditorPrefs.GetString("CoffeeBean.Excel.JsonResourcesFolder", "Assets/Resources/Configs"),
-                ResourcesPath = EditorPrefs.GetString("CoffeeBean.Excel.ResourcesPath", "Configs"),
-                EncryptJson = EditorPrefs.GetBool("CoffeeBean.Excel.EncryptJson", true),
+                CompressData = EditorPrefs.GetBool("CoffeeBean.Excel.CompressData", true),
+                EncryptData = EditorPrefs.GetBool("CoffeeBean.Excel.EncryptData", true),
                 StrictTypeCheck = EditorPrefs.GetBool("CoffeeBean.Excel.StrictTypeCheck", true),
                 ArraySeparators = EditorPrefs.GetString("CoffeeBean.Excel.ArraySeparators", CExcelCellJson.DefaultArraySeparators),
                 SkipRowsWithoutKey = EditorPrefs.GetBool("CoffeeBean.Excel.SkipRowsWithoutKey", true),

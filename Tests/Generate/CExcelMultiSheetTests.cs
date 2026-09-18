@@ -5,7 +5,13 @@ using NUnit.Framework;
 
 namespace CoffeeBean.Excel.Tests
 {
-    /// <summary>多 Sheet 与分章节生成测试（对齐 Idle 约定：sheet 名 前缀_数字 → 聚合 Getter 按章节查询）。</summary>
+    /// <summary>
+    /// 多 Sheet 与分章节生成测试（对齐 Idle 约定：sheet 名 前缀_数字 → 聚合 Getter 按章节查询）。
+    ///
+    /// 0.6.0 起一个章节族共用包内一个目录 <c>&lt;包&gt;/&lt;前缀&gt;/</c>：
+    /// 代码在 <c>Code/</c>（基类 + 各章节子类 + 章节 Getter + 聚合 Getter），
+    /// 数据在 <c>Data/&lt;前缀&gt;_&lt;章节&gt;.cbcfg</c>（数据名 = sheet 名）。
+    /// </summary>
     public class CExcelMultiSheetTests
     {
         private string _tmpXlsx;
@@ -37,54 +43,102 @@ namespace CoffeeBean.Excel.Tests
         [Test]
         public void GenerateAllSheets_ProducesChapterArtifacts()
         {
-            CExcelGenerateResult result = CExcelGenerator.GenerateAllSheets(_tmpXlsx,
-                new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources", Namespace = "Config" });
+            CExcelGenerateOptions options = CExcelTestFactory.TempPackageOptions(_tmpOut, "Config");
+            CExcelGenerateResult result = CExcelGenerator.GenerateAllSheets(_tmpXlsx, options);
 
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
 
-            // 每章节：JSON（Resources 目录）+ 子类 + 章节 Getter；聚合：基类 + 聚合 Getter
-            Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "Resources", "ChapterConfig_1.json")));
-            Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "Resources", "ChapterConfig_2.json")));
-            Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "ChapterConfigConfigBase.cs")), "应生成章节基类");
-            Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "ChapterConfig_1Config.cs")), "应生成章节子类");
-            Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "ChapterConfig_2Config.cs")));
-            Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "ChapterConfig_1Getter.cs")));
-            Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "ChapterConfigGetter.cs")), "应生成聚合 Getter");
+            // 每章节：数据容器 + 子类 + 章节 Getter；聚合：基类 + 聚合 Getter —— 全在 <包>/ChapterConfig/ 下
+            Assert.IsTrue(File.Exists(CExcelTestFactory.DataPath(options, "ChapterConfig", "ChapterConfig_1")));
+            Assert.IsTrue(File.Exists(CExcelTestFactory.DataPath(options, "ChapterConfig", "ChapterConfig_2")));
+            Assert.IsTrue(File.Exists(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfigBase.cs")), "应生成章节基类");
+            Assert.IsTrue(File.Exists(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfigChapter1.cs")), "应生成第 1 章子类");
+            Assert.IsTrue(File.Exists(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfigChapter2.cs")), "应生成第 2 章子类");
+            Assert.IsTrue(File.Exists(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfigChapter1Getter.cs")), "应生成第 1 章独立 Getter");
+            Assert.IsTrue(File.Exists(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfigChapter2Getter.cs")), "应生成第 2 章独立 Getter");
+            Assert.IsTrue(File.Exists(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfigGetter.cs")), "应生成聚合 Getter");
+
+            // 旧命名（<前缀>ConfigBase.cs / <前缀>_<N>Config.cs / <前缀>_<N>Getter.cs）必须彻底消失，
+            // 否则新老两套产物会同时被 Unity 编译 → 类型重复
+            Assert.IsFalse(File.Exists(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfigConfigBase.cs")),
+                "旧名 <前缀>ConfigBase.cs 不该再产出");
+            Assert.IsFalse(File.Exists(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfig_1Config.cs")),
+                "旧名 <前缀>_<N>Config.cs 不该再产出");
+            Assert.IsFalse(File.Exists(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfig_1Getter.cs")),
+                "旧名 <前缀>_<N>Getter.cs 不该再产出");
+
+            // 数据容器能按运行时的方式解开（章节数据名 = sheet 名）
+            StringAssert.Contains("第一章", CExcelTestFactory.ReadDataJson(
+                CExcelTestFactory.DataPath(options, "ChapterConfig", "ChapterConfig_1")));
         }
 
         [Test]
         public void ChapterGetter_ProvidesChapterQueries()
         {
-            CExcelGenerator.GenerateAllSheets(_tmpXlsx, new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources" });
-            string getter = File.ReadAllText(Path.Combine(_tmpOut, "ChapterConfigGetter.cs"));
+            CExcelGenerateOptions options = CExcelTestFactory.TempPackageOptions(_tmpOut);
+            CExcelGenerator.GenerateAllSheets(_tmpXlsx, options);
+            string getter = File.ReadAllText(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfigGetter.cs"));
 
+            StringAssert.Contains("private const string DataPathPrefix = \"ChapterConfig/Data/ChapterConfig_\";", getter,
+                "聚合 Getter 固化的是章节族的数据路径前缀");
             StringAssert.Contains("public static readonly int[] Chapters = new[] { 1, 2 };", getter);
-            StringAssert.Contains("public static List<ChapterConfig_1Config> Chapter1", getter);
-            StringAssert.Contains("public static List<ChapterConfig_2Config> Chapter2", getter);
-            StringAssert.Contains("GetByID(int key, int chapterId)", getter);
-            StringAssert.Contains("1 => Find(Chapter1, key),", getter);
-            StringAssert.Contains("2 => Find(Chapter2, key),", getter);
-            StringAssert.Contains("GetChapter(int chapterId)", getter);
-            StringAssert.Contains("where T : ChapterConfigConfigBase", getter);
+            StringAssert.Contains("public static int ChapterCount => Chapters.Length;", getter);
+            StringAssert.Contains("public static bool HasChapter(int chapterId)", getter,
+                "新增：判断章节是否存在（不再让调用方自己遍历 Chapters）");
+            StringAssert.Contains("public static IReadOnlyList<ChapterConfigChapter1> Chapter1", getter,
+                "每章节访问器改为只读接口");
+            StringAssert.Contains("public static IReadOnlyList<ChapterConfigChapter2> Chapter2", getter);
+            StringAssert.Contains("public static ChapterConfigBase Get(int key, int chapterId)", getter,
+                "按章节取行的方法名是 Get（旧名 GetByID）");
+            StringAssert.Contains("public static bool TryGet(int key, int chapterId, out ChapterConfigBase value)", getter);
+            StringAssert.Contains("public static bool Contains(int key, int chapterId) => Get(key, chapterId) != null;", getter);
+            StringAssert.Contains("public static void Reload()", getter);
+            StringAssert.Contains("public static void LoadFrom(int chapterId, byte[] container) => ApplyChapter(chapterId, container);", getter);
+            StringAssert.Contains("public static IReadOnlyList<ChapterConfigBase> GetChapter(int chapterId)", getter);
+            StringAssert.Contains("default: return None;", getter,
+                "未知章节返回预建的空数组（旧版是 Enumerable.Empty，需要 System.Linq）");
+            StringAssert.Contains("where T : ChapterConfigBase", getter);
+            StringAssert.Contains("private static List<T> LoadChapter<T>(int chapterId) where T : ChapterConfigBase", getter,
+                "章节加载方法的旧名是 Load<T>");
+
+            // 章节分派：模板用 switch 语句逐章节回调（旧版是 switch 表达式 1 => Find(...)）
+            StringAssert.Contains("case 1: return Find(Chapter1, key);", getter);
+            StringAssert.Contains("case 2: return Find(Chapter2, key);", getter);
+
+            // 加载路径 = 前缀 + 章节号 + 扩展名；注册也要每章节一条（否则 PreloadAll 会漏章节）
+            StringAssert.Contains("ConfigTableRuntime.ReadData(DataPathPrefix + chapterId + ConfigTableRuntime.DataExtension)", getter);
+            StringAssert.Contains("private sealed class Registration : IConfigTable", getter);
+            StringAssert.Contains("foreach (int chapter in Chapters) ConfigTableRuntime.Register(new Registration(chapter));", getter);
+
+            // 外层结构类：泛型版 DataFile<T>（旧名 Wrapper<T>）
+            StringAssert.Contains("public sealed class DataFile<T> { public List<T> data; }", getter);
+
+            // usings 去掉了 System.Linq（改用预建空数组 + 显式 for 循环）
+            StringAssert.DoesNotContain("using System.Linq;", getter, "章节 Getter 不再需要 LINQ");
+            StringAssert.DoesNotContain("Wrapper", getter, "旧的外层结构类名 Wrapper<T> 已被 DataFile<T> 取代");
+            StringAssert.DoesNotContain("GetByID", getter, "旧方法名 GetByID 已被 Get(key, chapterId) 取代");
         }
 
         [Test]
         public void ChapterSubClass_InheritsBase()
         {
-            CExcelGenerator.GenerateAllSheets(_tmpXlsx, new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources" });
-            string sub = File.ReadAllText(Path.Combine(_tmpOut, "ChapterConfig_1Config.cs"));
+            CExcelGenerateOptions options = CExcelTestFactory.TempPackageOptions(_tmpOut);
+            CExcelGenerator.GenerateAllSheets(_tmpXlsx, options);
+            string sub = File.ReadAllText(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfigChapter1.cs"));
 
-            StringAssert.Contains("public sealed class ChapterConfig_1Config : ChapterConfigConfigBase", sub);
+            StringAssert.Contains("public sealed class ChapterConfigChapter1 : ChapterConfigBase", sub);
+            StringAssert.Contains("// Source sheet: ChapterConfig_1", sub, "子类仍是「一章一文件」，只是类名换成 <前缀>Chapter<N>");
             Assert.IsFalse(sub.Contains("public int Id;"), "字段应在基类，子类不重复声明");
         }
 
         [Test]
         public void ChapterBaseClass_DeclaresAllFields()
         {
-            CExcelGenerator.GenerateAllSheets(_tmpXlsx, new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources" });
-            string baseClass = File.ReadAllText(Path.Combine(_tmpOut, "ChapterConfigConfigBase.cs"));
+            CExcelGenerateOptions options = CExcelTestFactory.TempPackageOptions(_tmpOut);
+            CExcelGenerator.GenerateAllSheets(_tmpXlsx, options);
+            string baseClass = File.ReadAllText(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfigBase.cs"));
 
-            StringAssert.Contains("public class ChapterConfigConfigBase", baseClass);
+            StringAssert.Contains("public class ChapterConfigBase", baseClass);
             StringAssert.Contains("public int Id;", baseClass);
             StringAssert.Contains("public string Name;", baseClass);
             StringAssert.Contains("public int[] Rewards;", baseClass);
@@ -99,12 +153,13 @@ namespace CoffeeBean.Excel.Tests
                 ("Normal", new[] { CExcelTestFactory.Row("Id_i", 1, "Name_s", "A") }));
             try
             {
-                CExcelGenerateResult result = CExcelGenerator.GenerateAllSheets(path,
-                    new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources" });
+                CExcelGenerateOptions options = CExcelTestFactory.TempPackageOptions(_tmpOut);
+                CExcelGenerateResult result = CExcelGenerator.GenerateAllSheets(path, options);
 
                 Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
-                Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "Normal.cs")), "正常 sheet 应生成");
-                Assert.IsFalse(File.Exists(Path.Combine(_tmpOut, "Sheet1.cs")), "默认名 Sheet1 应被跳过");
+                Assert.IsTrue(File.Exists(CExcelTestFactory.CodePath(options, "Normal", "Normal.cs")), "正常 sheet 应生成");
+                Assert.IsFalse(File.Exists(CExcelTestFactory.CodePath(options, "Sheet1", "Sheet1.cs")), "默认名 Sheet1 应被跳过");
+                Assert.IsFalse(File.Exists(CExcelTestFactory.DataPath(options, "Sheet1", "Sheet1")), "默认名 Sheet1 不该产出数据");
             }
             finally
             {
@@ -115,19 +170,21 @@ namespace CoffeeBean.Excel.Tests
         [Test]
         public void Generate_SingleSheet_ClassNameOption()
         {
-            // 单 sheet 表：ClassName 选项决定类名
+            // 单 sheet 表：ClassName 选项决定类名（= 表文件夹名 = 数据名）
             string path = CExcelTestFactory.CreateTempTable(new[]
             {
                 CExcelTestFactory.Row("Id_i", 1, "Name_s", "A"),
             }, "MyTable");
             try
             {
-                CExcelGenerateResult result = CExcelGenerator.Generate(path,
-                    new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources", ClassName = "CustomName" });
+                CExcelGenerateOptions options = CExcelTestFactory.TempPackageOptions(_tmpOut);
+                options.ClassName = "CustomName";
+                CExcelGenerateResult result = CExcelGenerator.Generate(path, options);
 
                 Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
-                Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "CustomName.cs")));
-                Assert.IsTrue(File.Exists(Path.Combine(_tmpOut, "CustomNameGetter.cs")));
+                Assert.IsTrue(File.Exists(CExcelTestFactory.CodePath(options, "CustomName", "CustomName.cs")));
+                Assert.IsTrue(File.Exists(CExcelTestFactory.CodePath(options, "CustomName", "CustomNameGetter.cs")));
+                Assert.IsTrue(File.Exists(CExcelTestFactory.DataPath(options, "CustomName", "CustomName")));
             }
             finally
             {
@@ -145,11 +202,12 @@ namespace CoffeeBean.Excel.Tests
             }, "PlainTable");
             try
             {
-                CExcelGenerateResult result = CExcelGenerator.Generate(path,
-                    new CExcelGenerateOptions { OutputFolder = _tmpOut, JsonResourcesFolder = _tmpOut + "/Resources", ClassName = "Plain" });
+                CExcelGenerateOptions options = CExcelTestFactory.TempPackageOptions(_tmpOut);
+                options.ClassName = "Plain";
+                CExcelGenerateResult result = CExcelGenerator.Generate(path, options);
                 Assert.IsTrue(result.Success);
 
-                string classText = File.ReadAllText(Path.Combine(_tmpOut, "Plain.cs"));
+                string classText = File.ReadAllText(CExcelTestFactory.CodePath(options, "Plain", "Plain.cs"));
                 StringAssert.Contains("Auto-generated by CoffeeBean.Excel. Do not edit.", classText);
                 StringAssert.Contains("/// <summary>Id_i</summary>", classText, "无说明行时注释用源列名");
                 Assert.IsFalse(ContainsChinese(classText), "单行表头生成的代码不应含中文");

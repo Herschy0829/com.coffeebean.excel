@@ -1,5 +1,75 @@
 # Changelog
 
+## [0.6.0] - 2026-09-18
+
+### Breaking
+**产物布局整体改造：代码与数据都生成到内嵌包（Assets 之外），数据换成二进制容器。**
+
+起因是一个真实消费工程（带 spine-unity）的报错：
+`Failed to read 'X'. Extension is '.json' but content looks like binary 'skel.bytes' file.`
+—— 生成收尾的 `AssetDatabase.Refresh()` 会让 spine-unity 的后处理器去解析**项目里每一个 `.json`**，
+而加密后的表是密文，于是 57 张表刷出 57 条 Error。关键事实：spine-unity 的
+`HandleOnPostprocessAllAssets` **没有任何路径过滤**，`AssetCanBeModified` 甚至明确把 Local/Embedded
+包资产视为可改 —— 所以"把产物挪个地方"躲不掉，必须同时解决**扩展名**与**位置**。
+
+新布局（`CodeFolder`，默认 `Packages/com.coffeebean.config.generated`，**完全不写进 Assets**）：
+
+```
+<包>/<表>/Code/表名.cs, 表名Getter.cs
+<包>/<表>/Data/表名.cbcfg
+<包>/Runtime/ConfigTableRuntime.cs
+<包>/package.json, coffeebean.configgen.json, {Namespace}.Generated.asmdef
+```
+
+### Added
+- **`.cbcfg` 数据容器**：`magic "CBG1" | version | flags | reserved | rawLength | rawChecksum | payload`，
+  `payload = Deflate(JSON) → XOR`。**顺序恒为先压缩再加密**（反过来密文近似随机、压不动）；
+  FNV-1a 校验和能识别截断与损坏，解不开时明确报错而不是解出半个表。
+- **运行时支撑代码生成**（`Runtime/ConfigTableRuntime.cs`）：容器解码 + 双根路径解析
+  （Editor 读包本体 / Player 读 `StreamingAssets/<包名>/`）+ `PreloadAll()` 协程（Android 走 UnityWebRequest）。
+- **全量预加载**：每个 Getter 自注册（`IConfigTable` + `[RuntimeInitializeOnLoadMethod]`），
+  `yield return ConfigTableRuntime.PreloadAll();` 之后原有同步 API（`All` / `Get`）直接可用，**业务代码零改动**。
+- **构建钩子**：`BuildPlayerProcessor.PrepareForBuild` + `AddAdditionalPathToStreamingAssets`
+  把每个 `<表>/Data` 挂进产物的 `StreamingAssets/<包名>/<表>/Data`。
+  > 包内的 `StreamingAssets/` 文件夹**不会**被 Unity 自动收录（官方文档要求 StreamingAssets 必须在 `Assets/` 根下），
+  > 这正是必须走该 API 的原因。
+- 新选项：`CodeFolder`、`PackageName`、`CompressData`。
+
+### Changed (breaking)
+- 选项改名/删除：`OutputFolder` → `CodeFolder`；`EncryptJson` → `EncryptData`；
+  `GenerateJson` → `GenerateData`；**删除** `JsonResourcesFolder`、`ResourcesPath`。
+- 数据不再生成 `.json`，不再写进 `Assets/Resources/`；加载不再用 `Resources.Load`。
+- 生成的 Getter 不再内嵌解密逻辑（搬到 `ConfigTableRuntime`），新增 `ApplyContainer` 与自注册；模板版本 v2 → **v3**。
+- 压缩/加密开关只影响数据文件的**头部 flags**，**不影响生成的代码** —— 从结构上排除"生成端关了加密、运行时按加密读"的错配。
+
+### Changed (生成代码的命名与接口面)
+- **章节产物命名去掉重复的 "Config"**：`<前缀>ConfigBase` → **`<前缀>Base`**、
+  `<前缀>_<N>Config` → **`<前缀>Chapter<N>`**、`<前缀>_<N>Getter` → **`<前缀>Chapter<N>Getter`**。
+  （旧名会生成 `ChapterConfigConfigBase` 这种读起来很糟的标识符。）
+- **普通表 Getter 接口面**：`IsLoaded` / `Count` / `All`（改为 `IReadOnlyList<T>`，避免误改缓存）/ `Get` /
+  **`TryGet`** / **`Contains`** / **`GetByIndex`** / **`Find`** / **`FindAll`** / **`Reload`** / **`LoadFrom`**。
+- **章节聚合 Getter 接口面**：`GetByID(key, chapterId)` → **`Get(key, chapterId)`**；新增
+  **`TryGet`** / **`Contains`** / **`HasChapter`** / **`Reload`** / **`LoadFrom`**；
+  `GetChapter(chapterId)` 返回 `IReadOnlyList<基类>`，未知章节返回空数组（不再用 `Enumerable.Empty`）。
+- 数据文件外层 DTO 由含糊的 `Wrapper` 更名为 **`DataFile`**（带文档注释）；章节 `Load<T>` 更名为 `LoadChapter<T>`。
+- **新增 `GetAll(key)`（章节为 `GetAll(key, chapterId)`）**：一个键对应多行时取全部；`Get(key)` 的语义明确为
+  "同键多行时给**第一行**"（索引构建改为首次出现者胜，不再被最后一行覆盖）。
+- **没有可做键的列的表不再报错**：以前直接报"未找到主键列"且不产出任何东西，于是这类表**完全拿不到数据**。
+  现在照样生成（给出警告 + 生成代码内注释），只省略按主键的接口，改用 `All` / `Count` / `GetByIndex` /
+  `Find` / `FindAll` 访问；章节族同理（保留 `GetChapter` / `ChapterN` / `HasChapter`）。
+
+### Migration（消费工程）
+1. 窗口里设「代码包目录」= `Packages/<你的包名>`、「包名」= 同一个末级目录名（不一致会警告，运行时/构建会错位）；
+2. 删除旧产物：`Assets/Configs/Generated/`、`Assets/Resources/Configs/`（连同 `.meta`）；
+3. 重新生成全部表 —— `Packages/<包名>/` 会作为内嵌包被 Unity 编译（首次触发一次 UPM 解析）；
+4. 启动流程里加一次 `yield return ConfigTableRuntime.PreloadAll();`（Android 必需，其余平台可选）。
+
+### Tests
+- 新增 `CExcelDataContainerTests`：编解码往返、压缩确实变小、魔术字/版本/截断/校验和四类失败、
+  明文模式、确定性。
+- 新增/重写：Getter 与压缩加密开关**解耦**、数据路径为表内相对路径、
+  包根**除 `package.json` 与标记文件外不得出现任何 `.json`**（针对本次问题的回归断言）。
+
 ## [0.5.2] - 2026-09-18
 
 ### Fixed

@@ -9,13 +9,16 @@ namespace CoffeeBean.Excel.Tests
     /// 枚举生成 / 严格校验的**端到端**测试（Excel → 生成产物）。
     ///
     /// 单元级的枚举规则在 <c>CExcelEnumDefTests</c>；这里只关心"从一张真表走到产物"这条链：
-    /// 生成的枚举类型、字段类型、JSON 里的数字、引用模式的类型名，以及
+    /// 生成的枚举类型、字段类型、数据容器里的数字、引用模式的类型名，以及
     /// "数据填错必须在生成前被拦下"（以前会安静地写成 0）。
+    ///
+    /// 0.6.0 起产物在临时包内：代码 <c>&lt;包&gt;/&lt;表&gt;/Code/</c>、数据 <c>&lt;包&gt;/&lt;表&gt;/Data/*.cbcfg</c>。
     /// </summary>
     public class CExcelEnumGenerationTests
     {
         private string _tmpXlsx;
         private string _tmpOut;
+        private CExcelGenerateOptions _options;
 
         [TearDown]
         public void TearDown()
@@ -24,25 +27,25 @@ namespace CoffeeBean.Excel.Tests
             if (_tmpOut != null && Directory.Exists(_tmpOut)) Directory.Delete(_tmpOut, true);
             _tmpXlsx = null;
             _tmpOut = null;
+            _options = null;
         }
 
         private CExcelGenerateResult Generate(IDictionary<string, object>[] rows, string sheetName = "Building", string className = null)
         {
             _tmpXlsx = CExcelTestFactory.CreateTempTable(rows, sheetName);
             _tmpOut = Path.Combine(Path.GetTempPath(), "coffeebean_enum_out_" + Guid.NewGuid().ToString("N"));
-            var options = new CExcelGenerateOptions
-            {
-                OutputFolder = _tmpOut,
-                Namespace = "Config",
-                ClassName = className,
-                JsonResourcesFolder = _tmpOut + "/Resources",
-                ResourcesPath = "Configs",
-                EncryptJson = false,
-            };
-            return CExcelGenerator.Generate(_tmpXlsx, options);
+            _options = CExcelTestFactory.TempPackageOptions(_tmpOut, "Config");
+            _options.ClassName = className;
+            return CExcelGenerator.Generate(_tmpXlsx, _options);
         }
 
-        private string Out(string name) => File.ReadAllText(Path.Combine(_tmpOut, name));
+        /// <summary>读生成的代码文件（tableFolder = 普通表类名 / 章节表章节前缀）。</summary>
+        private string Code(string tableFolder, string fileName)
+            => File.ReadAllText(CExcelTestFactory.CodePath(_options, tableFolder, fileName));
+
+        /// <summary>读 + 解数据容器，返回 JSON 文本（dataName = 普通表类名 / 章节表 sheet 名）。</summary>
+        private string Data(string tableFolder, string dataName)
+            => CExcelTestFactory.ReadDataJson(CExcelTestFactory.DataPath(_options, tableFolder, dataName));
 
         // ========== 生成模式 ==========
 
@@ -58,7 +61,7 @@ namespace CoffeeBean.Excel.Tests
 
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
 
-            string classText = Out("Building.cs");
+            string classText = Code("Building", "Building.cs");
             StringAssert.Contains("public enum BuildingState", classText, "枚举类型名 = 类名 + 字段名");
             StringAssert.Contains("Green = 0,", classText);
             StringAssert.Contains("Idle = 1,", classText);
@@ -91,8 +94,8 @@ namespace CoffeeBean.Excel.Tests
             }, className: "Unit");
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
 
-            StringAssert.Contains("public UnitTags[] Tags;", Out("Unit.cs"));
-            StringAssert.Contains("\"Tags\":[3,1]", File.ReadAllText(Path.Combine(_tmpOut, "Resources", "Unit.json")),
+            StringAssert.Contains("public UnitTags[] Tags;", Code("Unit", "Unit.cs"));
+            StringAssert.Contains("\"Tags\":[3,1]", Data("Unit", "Unit"),
                 "Cold|Hot = 1|2 = 3，第二个元素是 1");
         }
 
@@ -106,7 +109,7 @@ namespace CoffeeBean.Excel.Tests
             }, className: "Building");
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
 
-            string json = File.ReadAllText(Path.Combine(_tmpOut, "Resources", "Building.json"));
+            string json = Data("Building", "Building");
             StringAssert.Contains("\"State\":0", json);
             StringAssert.Contains("\"State\":1", json);
         }
@@ -123,13 +126,13 @@ namespace CoffeeBean.Excel.Tests
             }, className: "Unit");
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
 
-            string classText = Out("Unit.cs");
+            string classText = Code("Unit", "Unit.cs");
             StringAssert.Contains("[System.Flags]", classText);
             StringAssert.Contains("public enum UnitTags", classText);
             StringAssert.Contains("Cold = 1,", classText);
             StringAssert.Contains("Hot = 2,", classText);
 
-            string json = File.ReadAllText(Path.Combine(_tmpOut, "Resources", "Unit.json"));
+            string json = Data("Unit", "Unit");
             StringAssert.Contains("\"Tags\":1", json);
             StringAssert.Contains("\"Tags\":2", json);
             StringAssert.Contains("\"Tags\":3", json, "Cold|Hot = 1|2 = 3");
@@ -146,8 +149,8 @@ namespace CoffeeBean.Excel.Tests
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
 
             // 类型名 = 类名 + 字段名（字段名 = State_ea → State），数组只在字段声明上加 []
-            StringAssert.Contains("public BuildingState[] State;", Out("Building.cs"));
-            StringAssert.Contains("\"State\":[0,1]", File.ReadAllText(Path.Combine(_tmpOut, "Resources", "Building.json")));
+            StringAssert.Contains("public BuildingState[] State;", Code("Building", "Building.cs"));
+            StringAssert.Contains("\"State\":[0,1]", Data("Building", "Building"));
         }
 
         /// <summary>列名冲突防护：不同表的同名枚举类型不能互相踩。</summary>
@@ -160,8 +163,8 @@ namespace CoffeeBean.Excel.Tests
             }, className: "Unit");
 
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
-            StringAssert.Contains("public enum UnitState", Out("Unit.cs"));
-            StringAssert.DoesNotContain("BuildingState", Out("Unit.cs"));
+            StringAssert.Contains("public enum UnitState", Code("Unit", "Unit.cs"));
+            StringAssert.DoesNotContain("BuildingState", Code("Unit", "Unit.cs"));
         }
 
         // ========== 引用模式 ==========
@@ -176,11 +179,11 @@ namespace CoffeeBean.Excel.Tests
             }, className: "Weekday");
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
 
-            string classText = Out("Weekday.cs");
+            string classText = Code("Weekday", "Weekday.cs");
             StringAssert.Contains("public System.DayOfWeek Day;", classText);
             StringAssert.DoesNotContain("public enum", classText, "引用模式不生成枚举");
 
-            string json = File.ReadAllText(Path.Combine(_tmpOut, "Resources", "Weekday.json"));
+            string json = Data("Weekday", "Weekday");
             StringAssert.Contains("\"Day\":1", json);
             StringAssert.Contains("\"Day\":5", json);
         }
@@ -227,17 +230,14 @@ namespace CoffeeBean.Excel.Tests
             }, "Building");
             _tmpOut = Path.Combine(Path.GetTempPath(), "coffeebean_lenient_" + Guid.NewGuid().ToString("N"));
 
-            CExcelGenerateResult result = CExcelGenerator.Generate(_tmpXlsx, new CExcelGenerateOptions
-            {
-                OutputFolder = _tmpOut,
-                ClassName = "Building",
-                JsonResourcesFolder = _tmpOut + "/Resources",
-                EncryptJson = false,
-                StrictTypeCheck = false,   // 老表迁移期的逃生门
-            });
+            _options = CExcelTestFactory.TempPackageOptions(_tmpOut, "Config");
+            _options.ClassName = "Building";
+            _options.StrictTypeCheck = false;   // 老表迁移期的逃生门
+
+            CExcelGenerateResult result = CExcelGenerator.Generate(_tmpXlsx, _options);
 
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
-            StringAssert.Contains("\"Level\":0", File.ReadAllText(Path.Combine(_tmpOut, "Resources", "Building.json")));
+            StringAssert.Contains("\"Level\":0", Data("Building", "Building"));
         }
 
         /// <summary>
@@ -266,7 +266,7 @@ namespace CoffeeBean.Excel.Tests
             }, className: "Building");
 
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
-            string json = File.ReadAllText(Path.Combine(_tmpOut, "Resources", "Building.json"));
+            string json = Data("Building", "Building");
             StringAssert.Contains("\"Rate\":0", json);
         }
 
@@ -287,27 +287,32 @@ namespace CoffeeBean.Excel.Tests
                 }));
             _tmpOut = Path.Combine(Path.GetTempPath(), "coffeebean_chapter_enum_" + Guid.NewGuid().ToString("N"));
 
-            CExcelGenerateResult result = CExcelGenerator.GenerateAllSheets(_tmpXlsx, new CExcelGenerateOptions
-            {
-                OutputFolder = _tmpOut,
-                Namespace = "Config",
-                JsonResourcesFolder = _tmpOut + "/Resources",
-                EncryptJson = false,
-            });
+            _options = CExcelTestFactory.TempPackageOptions(_tmpOut, "Config");
+            CExcelGenerateResult result = CExcelGenerator.GenerateAllSheets(_tmpXlsx, _options);
 
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
 
-            string baseClass = File.ReadAllText(Path.Combine(_tmpOut, "StageConfigConfigBase.cs"));
+            // 章节族共用一个目录 <包>/StageConfig/：基类在 Code/、各章节数据在 Data/
+            string baseClass = Code("StageConfig", "StageConfigBase.cs");
             StringAssert.Contains("public enum StageConfigState", baseClass, "章节枚举用章节前缀命名，各章节共用一个类型");
             StringAssert.Contains("Green = 0,", baseClass);
             StringAssert.Contains("Idle = 1,", baseClass);
             StringAssert.Contains("Boss = 2,", baseClass, "第 2 章的新取值要并进同一个枚举");
             StringAssert.Contains("public StageConfigState State;", baseClass);
+            StringAssert.Contains("public class StageConfigBase", baseClass, "枚举定义所在的章节基类新名是 <前缀>Base");
 
-            // 子类不自带枚举（枚举在基类文件里，只生成一次）
-            StringAssert.DoesNotContain("public enum", File.ReadAllText(Path.Combine(_tmpOut, "StageConfig_1Config.cs")));
+            // 子类不自带枚举（枚举在基类文件里，只生成一次）；类名新规范是 <前缀>Chapter<N>
+            string chapterOne = Code("StageConfig", "StageConfigChapter1.cs");
+            StringAssert.Contains("public sealed class StageConfigChapter1 : StageConfigBase", chapterOne);
+            StringAssert.DoesNotContain("public enum", chapterOne);
 
-            string chapterTwoJson = File.ReadAllText(Path.Combine(_tmpOut, "Resources", "StageConfig_2.json"));
+            // 章节独立 Getter 也跟着新命名（旧名 StageConfig_1Getter.cs）
+            Assert.IsTrue(File.Exists(CExcelTestFactory.CodePath(_options, "StageConfig", "StageConfigChapter1Getter.cs")),
+                "章节独立 Getter 应为 <前缀>Chapter<N>Getter.cs");
+            Assert.IsFalse(File.Exists(CExcelTestFactory.CodePath(_options, "StageConfig", "StageConfig_1Getter.cs")),
+                "旧名 <前缀>_<N>Getter.cs 不该再产出");
+
+            string chapterTwoJson = Data("StageConfig", "StageConfig_2");
             StringAssert.Contains("\"State\":2", chapterTwoJson, "并集编号要对所有章节一致");
         }
     }

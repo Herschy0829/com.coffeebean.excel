@@ -1,6 +1,6 @@
 # CoffeeBean Excel（com.coffeebean.excel）
 
-CoffeeBean 框架的 **Excel 配置表工具模块**（Editor-only）：读取 → 列类型 → 生成 **JSON + C# 数据类 + Getter** 三件套。
+CoffeeBean 框架的 **Excel 配置表工具模块**（Editor-only）：读取 → 列类型 → 生成 **内嵌包产物**（`<表>/Code/` 代码 + `<表>/Data/<表>.cbcfg` 数据容器，都在 Assets 之外）。
 
 > 设计文档：`docs/design-excel.md`（v0.5.0）
 > ⚠ 升级到 **0.5.0** 前请先看 `CHANGELOG.md` 顶部的破坏性变更：`_b` 现在是 **BigInteger**（bool 改用 `_bool`），
@@ -86,7 +86,9 @@ using CoffeeBean;   // 生成类默认也在 CoffeeBean 命名空间
 
 var options = new CExcelGenerateOptions
 {
-    OutputFolder = "Assets/Configs/Generated",
+    // 代码与数据都生成到内嵌包（Assets 之外）；一表一文件夹：<表>/Code/ + <表>/Data/
+    CodeFolder = "Packages/com.coffeebean.config.generated",
+    PackageName = "com.coffeebean.config.generated",   // 必须与 CodeFolder 末级目录名一致
     StrictTypeCheck = true,   // 默认 true：每格按声明类型真解析，填错报第几行第几列
 };
 CExcelGenerateResult result = CExcelGenerator.Generate("Assets/Excel/ChapterConfig.xlsx", options);
@@ -97,12 +99,14 @@ CExcelGenerator.GenerateFolder(folder, options);
 List<CExcelIssue> issues = CExcelGenerator.Validate(path, sheetName, options);
 ```
 
-产物（`OutputFolder` 下）：
+产物（全部在 `CodeFolder` 这个内嵌包下，**不写进 Assets**）：
 
-- `表名.cs` —— 强类型数据类 + 该表用到的枚举定义
-- `表名Getter.cs` —— 加载器（`All` 懒加载 + `Get(主键)`）
+- `<表>/Code/表名.cs` —— 强类型数据类 + 该表用到的枚举定义
+- `<表>/Code/表名Getter.cs` —— 加载器（`All` 懒加载 + `Get(主键)` + 自注册供预加载）
+- `<表>/Data/表名.cbcfg` —— 表数据容器（Deflate 压缩 + XOR 加密，见 §6）
 - `{Namespace}.Generated.asmdef` —— 生成代码独立程序集（改表只重编译这一小个程序集）
-- `Resources/Configs/表名.json` —— 表数据 `{"data":[...]}`（可 XOR 混淆加密）
+- `Runtime/ConfigTableRuntime.cs` —— 运行时支撑（容器解码 + 预加载 + 数据路径解析）
+- `package.json` + `coffeebean.configgen.json` —— 内嵌包清单与构建钩子标记（后者别删）
 
 ### 4. 多 Sheet 与分章节（对齐项目约定）
 
@@ -110,19 +114,20 @@ List<CExcelIssue> issues = CExcelGenerator.Validate(path, sheetName, options);
 - **分章节**：sheet 名形如 `前缀_数字`（`ChapterConfig_1`、`ChapterConfig_2`）→ 同前缀聚合：
 
 ```
-ChapterConfig_1.json / ChapterConfig_2.json    每章节数据
-ChapterConfigConfigBase.cs                     章节基类（全字段 + 共用枚举定义）
-ChapterConfig_1Config.cs / _2Config.cs         每章节子类（: 基类）
-ChapterConfig_1Getter.cs / _2Getter.cs         每章节独立加载器
-ChapterConfigGetter.cs                         聚合加载器（按章节查询）
+ChapterConfig/
+  Code/  ChapterConfigBase.cs                     章节基类（全字段 + 共用枚举定义）
+         ChapterConfigChapter1.cs / Chapter2.cs   每章节子类（: 基类）
+         ChapterConfigChapter1Getter.cs / ...     每章节独立加载器
+         ChapterConfigGetter.cs                   聚合加载器（按章节查询）
+  Data/  ChapterConfig_1.cbcfg / _2.cbcfg         每章节数据容器
 ```
 
 各章节的枚举取值会**取并集后统一编号**（同一成员在所有章节里拿到同一个值）。
 
 ```csharp
-ChapterConfigGetter.GetByID(100, chapterId: 1);   // 按章节 + 主键查询
-ChapterConfigGetter.GetChapter(chapterId: 2);     // 取某章节全部行（基类 IEnumerable）
-ChapterConfigGetter.Chapter1;                     // 第一章强类型 List
+ChapterConfigGetter.Get(100, chapterId: 1);       // 按章节 + 主键查询
+ChapterConfigGetter.GetChapter(chapterId: 2);     // 取某章节全部行（基类 IReadOnlyList）
+ChapterConfigGetter.Chapter1;                     // 第一章强类型 IReadOnlyList
 ```
 
 ### 5. 列中文说明（生成代码注释）
@@ -135,18 +140,55 @@ ChapterConfigGetter.Chapter1;                     // 第一章强类型 List
 ```csharp
 using CoffeeBean;  // 生成类在 CoffeeBean 命名空间（默认）
 
-var all = ChapterConfigGetter.All;       // List<ChapterConfig>（懒加载）
-var cfg = ChapterConfigGetter.Get(1);    // 按主键查询（默认第一个可做键的列：*_i/_l/_b/_s/_guid…）
+// 启动流程里跑一次预加载协程；之后所有同步 API 直接可用
+yield return ConfigTableRuntime.PreloadAll();
+
+// —— 普通表（表名 = ChapterConfig）——
+ChapterConfigGetter.All;                        // IReadOnlyList<ChapterConfig>（懒加载，只读）
+ChapterConfigGetter.Count;                      // 行数
+ChapterConfigGetter.IsLoaded;                   // 是否已加载
+ChapterConfigGetter.Get(1);                     // 按主键取一行；同一个键有多行时给**第一行**；找不到 null
+ChapterConfigGetter.GetAll(1);                  // 该主键的**全部**行（IReadOnlyList；没有则空列表）
+ChapterConfigGetter.TryGet(1, out var one);     // 同上，但返回 bool（不抛异常）
+ChapterConfigGetter.Contains(1);                // 主键是否存在
+ChapterConfigGetter.GetByIndex(0);              // 按下标取（越界 null）
+ChapterConfigGetter.Find(x => x.SwitchLevelId > 0);      // 第一个满足条件；没有则 null
+ChapterConfigGetter.FindAll(x => x.SwitchLevelId > 0);   // 所有满足条件（永不为 null）
+ChapterConfigGetter.Reload();                   // 丢缓存，下次访问重读（热更后用）
+ChapterConfigGetter.LoadFrom(containerBytes);   // 直接灌容器字节（测试/自定义加载）
+
+// —— 章节表（sheet: ChapterConfig_1 / ChapterConfig_2）——
+ChapterConfigGetter.Chapters;                   // int[]：可用章节号
+ChapterConfigGetter.ChapterCount;               // 章节数
+ChapterConfigGetter.HasChapter(2);              // 该章节是否存在
+ChapterConfigGetter.GetChapter(2);              // IReadOnlyList<ChapterConfigBase>（未知章节=空数组）
+ChapterConfigGetter.Get(100, chapterId: 1);     // 章节 + 主键（同键多行时给首行）
+ChapterConfigGetter.GetAll(100, chapterId: 1);  // 章节 + 主键的全部行
+ChapterConfigGetter.TryGet(100, 1, out var row);
+ChapterConfigGetter.Contains(100, 1);
+ChapterConfigGetter.Chapter1;                   // IReadOnlyList<ChapterConfigChapter1>（强类型）
+ChapterConfigGetter.Reload();                   // 清所有章节缓存
 ```
 
-**加载机制**：`Resources.Load<TextAsset>("Configs/表名")` → **Newtonsoft.Json** 反序列化 `{"data":[...]}`。
-JSON 必须生成在 Resources 目录下（生成器默认直接写入 `Assets/Resources/Configs/`，与 Getter 的 AssetPath 对齐）。
+**表里没有可做键的列时（没有 `*_i`/`*_l`/`*_s`/`*_e` 这类列）**：照样生成，只是**不产出按主键的接口**
+（`Get`/`GetAll`/`TryGet`/`Contains`），改用非主键访问——`All` / `Count` / `GetByIndex(i)` / `Find(pred)` / `FindAll(pred)`；
+生成时会给出对应警告，生成的代码里也有注释说明。章节族同理（只有 `GetChapter`/`ChapterN`/`HasChapter`）。
 
-**JSON 加密（默认开启）**：`EncryptJson = true` 时 JSON 以 XOR 密文字节写入（`CExcelCrypto`），Getter 运行时透明解密。
-> ⚠ 这是**混淆级**保护（key 在生成代码里，不防专业逆向）；调试时可在窗口关掉"加密 JSON"重新生成以便查看。
-> 加密是纯字节级 XOR，中文 / 日文 / emoji 无损往返。
+> 需要"两个字段都相同才算同一行"（如 游戏里 `GetDataBySameID(id, lev)`）时，用
+> `Getter.FindAll(x => x.Id == id && x.Lev == lev)`（我们只认单一主键，不猜复合键）。
 
-> 需要 Addressables / AssetBundle 按需加载的大表：当前 Getter 固定走 Resources（打进包）。
+**加载机制**：数据是 `<表>/Data/<表>.cbcfg` 容器 → `ConfigTableRuntime` 解容器（解 XOR → 解 Deflate → 校验长度与校验和）→ **Newtonsoft.Json** 反序列化 `{"data":[...]}`。
+
+- **Editor** 直接读内嵌包本体（`Packages/<包名>/...`）；**Player** 读 `Application.streamingAssetsPath/<包名>/...`。
+- 数据能进打包产物，靠的是本模块的**构建钩子**（`BuildPlayerProcessor.PrepareForBuild` + `AddAdditionalPathToStreamingAssets`）把每个 `<表>/Data` 挂进去 —— 包内的 `StreamingAssets/` 文件夹**不会被 Unity 自动收录**（官方要求 StreamingAssets 必须在 `Assets/` 根下）。
+- Android / Web：`streamingAssetsPath` 是 URL，`File.Read` 读不到 → **必须用 `PreloadAll()`**（内部走 UnityWebRequest）。
+
+**压缩 + 加密（默认都开）**：`CompressData`（Deflate）/ `EncryptData`（XOR 混淆级）。顺序恒为**先压缩再加密** —— 反过来密文近似随机、压不动。
+> ⚠ 加密是**混淆级**保护（key 硬编码在生成代码里，不防专业逆向）。
+> 两个开关只影响数据文件的**头部 flags**，**不影响生成的代码**；想直接看明文调试就把两个开关都关掉重新生成（容器头 16 字节之后就是明文 JSON）。
+
+> 需要 Addressables / AssetBundle 按需加载的大表：当前 Getter 固定**一次性读入内存**
+> （数据在包内 `<表>/Data`，打包时由构建钩子挂进 StreamingAssets）；要按需加载需要自己接 Addressables。
 
 ### 7. 编辑器窗口
 

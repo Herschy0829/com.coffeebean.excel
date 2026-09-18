@@ -11,11 +11,14 @@ namespace CoffeeBean.Excel.Tests
     /// 这些不是拍脑袋想的用例，是拿一个真实项目（28 张表 / 57 个 sheet）dogfood 出来的：
     /// 表头下面往往还有一段"字段 | 说明"的图例、或者某列旁边贴一串临时算的数，
     /// 它们的主键是空的；再加上数组普遍写成 `13_100`。旧行为下这两件小事会让**整批表**生成失败。
+    ///
+    /// 0.6.0 起产物在临时包内：代码 <c>&lt;包&gt;/&lt;表&gt;/Code/</c>、数据 <c>&lt;包&gt;/&lt;表&gt;/Data/*.cbcfg</c>。
     /// </summary>
     public class CExcelRealWorldTableTests
     {
         private string _tmpXlsx;
         private string _tmpOut;
+        private CExcelGenerateOptions _options;
 
         [TearDown]
         public void TearDown()
@@ -24,19 +27,30 @@ namespace CoffeeBean.Excel.Tests
             if (_tmpOut != null && Directory.Exists(_tmpOut)) Directory.Delete(_tmpOut, true);
             _tmpXlsx = null;
             _tmpOut = null;
+            _options = null;
         }
 
-        private CExcelGenerateResult Generate(IDictionary<string, object>[] rows, CExcelGenerateOptions options = null)
+        /// <summary>
+        /// 造表 + 生成到本用例的临时包；<paramref name="configure"/> 用来覆盖个别开关
+        /// （如 <c>SkipRowsWithoutKey</c>），产物位置一律由工厂的临时包选项决定。
+        /// </summary>
+        private CExcelGenerateResult Generate(IDictionary<string, object>[] rows, Action<CExcelGenerateOptions> configure = null)
         {
             _tmpXlsx = CExcelTestFactory.CreateTempTable(rows, "Building");
             _tmpOut = Path.Combine(Path.GetTempPath(), "coffeebean_rw_" + Guid.NewGuid().ToString("N"));
-            options = options ?? new CExcelGenerateOptions();
-            options.OutputFolder = _tmpOut;
-            options.ClassName = "Building";
-            options.JsonResourcesFolder = _tmpOut + "/Resources";
-            options.EncryptJson = false;
-            return CExcelGenerator.Generate(_tmpXlsx, options);
+            _options = CExcelTestFactory.TempPackageOptions(_tmpOut);
+            _options.ClassName = "Building";
+            configure?.Invoke(_options);
+            return CExcelGenerator.Generate(_tmpXlsx, _options);
         }
+
+        /// <summary>读生成的数据类代码。</summary>
+        private string Code(string fileName)
+            => File.ReadAllText(CExcelTestFactory.CodePath(_options, "Building", fileName));
+
+        /// <summary>读 + 解数据容器，返回 JSON 文本（普通表：表文件夹 = 数据名 = 类名）。</summary>
+        private string Data()
+            => CExcelTestFactory.ReadDataJson(CExcelTestFactory.DataPath(_options, "Building", "Building"));
 
         // ========== 说明行 / 图例行 ==========
 
@@ -61,7 +75,7 @@ namespace CoffeeBean.Excel.Tests
             StringAssert.Contains("4, 5, 6", warning.Message);
 
             // 产物里只有 2 行数据（字段名 "ID_i" → "ID"）
-            string json = File.ReadAllText(Path.Combine(_tmpOut, "Resources", "Building.json"));
+            string json = Data();
             Assert.AreEqual(2, CountOccurrences(json, "\"ID\":"), "JSON 里只该有真实数据行：" + json);
         }
 
@@ -72,7 +86,7 @@ namespace CoffeeBean.Excel.Tests
             {
                 CExcelTestFactory.Row("ID_i", 1, "Cost_l", 100),
                 CExcelTestFactory.Row("ID_i", null, "Cost_l", "说明"),
-            }, new CExcelGenerateOptions { SkipRowsWithoutKey = false });
+            }, o => o.SkipRowsWithoutKey = false);
 
             Assert.IsFalse(result.Success, "关掉跳过后，主键空行会被当成数据行 → 主键为空是错误");
             Assert.IsTrue(result.Issues.Exists(i => i.Level == CExcelIssueLevel.Error && i.Message.Contains("主键列是空的")),
@@ -95,7 +109,8 @@ namespace CoffeeBean.Excel.Tests
             Assert.IsFalse(result.Success);
             Assert.IsTrue(result.Issues.Exists(i => i.Level == CExcelIssueLevel.Error && i.Message.Contains("所有行")),
                 string.Join("\n", result.Issues));
-            Assert.IsFalse(File.Exists(Path.Combine(_tmpOut, "Resources", "Building.json")), "失败时不该产出空 JSON");
+            Assert.IsFalse(File.Exists(CExcelTestFactory.DataPath(_options, "Building", "Building")),
+                "失败时不该产出数据容器文件（空表产物会让运行时以为配置合法可读）");
         }
 
         /// <summary>ID 列坏、但另一列（Name_s）每行都合法时，主键自动落到那一列 —— 表照样能生成。</summary>
@@ -128,8 +143,16 @@ namespace CoffeeBean.Excel.Tests
             });
 
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
-            string getter = File.ReadAllText(Path.Combine(_tmpOut, "BuildingGetter.cs"));
+            string getter = Code("BuildingGetter.cs");
             StringAssert.Contains("Get(string key)", getter, "主键应落在每行都有值的 Name_s 上");
+
+            // 真实表的主键恰好是 string（不是 int）：整套查询面都要按 string 键生成，
+            // 否则主键类型一换就编译不过（这是模板 v3 新增接口里最容易出错的泛型点）
+            StringAssert.Contains("public static bool TryGet(string key, out Building value)", getter);
+            StringAssert.Contains("public static bool Contains(string key) => Get(key) != null;", getter);
+            StringAssert.Contains("public static Building Find(Func<Building, bool> predicate)", getter);
+            StringAssert.Contains("private static Dictionary<string, Building> BuildIndex()", getter);
+            StringAssert.Contains("public sealed class DataFile { public List<Building> data; }", getter);
         }
 
         // ========== 真实数组写法 ==========
@@ -144,12 +167,12 @@ namespace CoffeeBean.Excel.Tests
 
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
 
-            string classText = File.ReadAllText(Path.Combine(_tmpOut, "Building.cs"));
+            string classText = Code("Building.cs");
             StringAssert.Contains("public int[] Award;", classText);
             StringAssert.Contains("public float[] Ratio;", classText);
             StringAssert.Contains("public long[] Ids;", classText);
 
-            string json = File.ReadAllText(Path.Combine(_tmpOut, "Resources", "Building.json"));
+            string json = Data();
             StringAssert.Contains("\"Award\":[13,100]", json);
             StringAssert.Contains("\"Ratio\":[0.2,0.8,1]", json);
             StringAssert.Contains("\"Ids\":[200,500]", json);
@@ -184,14 +207,14 @@ namespace CoffeeBean.Excel.Tests
             });
 
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
-            string classText = File.ReadAllText(Path.Combine(_tmpOut, "Building.cs"));
+            string classText = Code("Building.cs");
             StringAssert.Contains("using System.Collections.Generic;", classText);
             StringAssert.Contains("public Dictionary<string,string> Attrs;", classText);
 
             // 没有字典列的表不该多这一行（生成代码保持干净）
             CExcelGenerateResult plain = Generate(new[] { CExcelTestFactory.Row("ID_i", 1, "Name_s", "A") });
             Assert.IsTrue(plain.Success, string.Join("\n", plain.Issues));
-            StringAssert.DoesNotContain("using System.Collections.Generic;", File.ReadAllText(Path.Combine(_tmpOut, "Building.cs")));
+            StringAssert.DoesNotContain("using System.Collections.Generic;", Code("Building.cs"));
         }
 
         /// <summary>两个列名去后缀后撞成同一个字段名 → 生成前就报（否则是看不懂的 CS0102/CS0101）。</summary>

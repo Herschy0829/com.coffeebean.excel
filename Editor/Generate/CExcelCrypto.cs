@@ -32,7 +32,8 @@ namespace CoffeeBean
             return Encoding.UTF8.GetString(Xor(cipher));
         }
 
-        private static byte[] Xor(byte[] data)
+        /// <summary>按位异或（确定性 key 流）。internal：供 <see cref="CExcelDataContainer"/> 复用作容器加密层。</summary>
+        internal static byte[] Xor(byte[] data)
         {
             byte[] key = GenerateKey(data.Length);
             var result = new byte[data.Length];

@@ -12,28 +12,28 @@ namespace CoffeeBean
     /// 单文件校验 / 预览在二级窗口（<see cref="CExcelFileWindow"/>，列表行"预览"按钮打开）。
     /// 增量：只重新生成修改过的表（<see cref="CExcelIncrementalGenerator"/> 记录文件修改时间）。
     /// </summary>
-    [CoffeeBeanTool("Excel 配置表工具", "文件夹批量生成 / 单表校验预览 / 增量生成（C# 类 + JSON）", "Excel")]
+    [CoffeeBeanTool("Excel 配置表工具", "文件夹批量生成 / 单表校验预览 / 增量生成（代码 + .cbcfg 数据 → 内嵌包，写在 Assets 之外）", "Excel")]
     public sealed class CExcelToolsWindow : EditorWindow
     {
         private const string PrefFolder = "CoffeeBean.Excel.Folder";
-        private const string PrefOutputFolder = "CoffeeBean.Excel.OutputFolder";
+        private const string PrefCodeFolder = "CoffeeBean.Excel.CodeFolder";
+        private const string PrefPackageName = "CoffeeBean.Excel.PackageName";
         private const string PrefNamespace = "CoffeeBean.Excel.Namespace";
-        private const string PrefJsonResources = "CoffeeBean.Excel.JsonResourcesFolder";
-        private const string PrefResourcesPath = "CoffeeBean.Excel.ResourcesPath";
-        private const string PrefEncryptJson = "CoffeeBean.Excel.EncryptJson";
+        private const string PrefCompressData = "CoffeeBean.Excel.CompressData";
+        private const string PrefEncryptData = "CoffeeBean.Excel.EncryptData";
         private const string PrefStrictTypeCheck = "CoffeeBean.Excel.StrictTypeCheck";
         private const string PrefArraySeparators = "CoffeeBean.Excel.ArraySeparators";
         private const string PrefSkipRowsWithoutKey = "CoffeeBean.Excel.SkipRowsWithoutKey";
 
         private string _folder;
-        private string _outputFolder = "Assets/Configs/Generated";
+        private string _codeFolder = "Packages/com.coffeebean.config.generated";
+        private string _packageName = "com.coffeebean.config.generated";
         private string _namespace = "CoffeeBean";
-        private string _jsonResourcesFolder = "Assets/Resources/Configs";
-        private string _resourcesPath = "Configs";
         private string _primaryKey = string.Empty;
-        private bool _generateJson = true;
+        private bool _generateData = true;
         private bool _generateClass = true;
-        private bool _encryptJson = true;
+        private bool _compressData = true;
+        private bool _encryptData = true;
         private bool _strictTypeCheck = true;
         private string _arraySeparators = CExcelCellJson.DefaultArraySeparators;
         private bool _skipRowsWithoutKey = true;
@@ -56,11 +56,11 @@ namespace CoffeeBean
         private void OnEnable()
         {
             _folder = EditorPrefs.GetString(PrefFolder, string.Empty);
-            _outputFolder = EditorPrefs.GetString(PrefOutputFolder, "Assets/Configs/Generated");
+            _codeFolder = EditorPrefs.GetString(PrefCodeFolder, "Packages/com.coffeebean.config.generated");
+            _packageName = EditorPrefs.GetString(PrefPackageName, "com.coffeebean.config.generated");
             _namespace = EditorPrefs.GetString(PrefNamespace, "CoffeeBean");
-            _jsonResourcesFolder = EditorPrefs.GetString(PrefJsonResources, "Assets/Resources/Configs");
-            _resourcesPath = EditorPrefs.GetString(PrefResourcesPath, "Configs");
-            _encryptJson = EditorPrefs.GetBool(PrefEncryptJson, true);
+            _compressData = EditorPrefs.GetBool(PrefCompressData, true);
+            _encryptData = EditorPrefs.GetBool(PrefEncryptData, true);
             _strictTypeCheck = EditorPrefs.GetBool(PrefStrictTypeCheck, true);
             _arraySeparators = EditorPrefs.GetString(PrefArraySeparators, CExcelCellJson.DefaultArraySeparators);
             _skipRowsWithoutKey = EditorPrefs.GetBool(PrefSkipRowsWithoutKey, true);
@@ -95,6 +95,8 @@ namespace CoffeeBean
                 CExcelIncrementalGenerator.Clear();
                 RefreshFileList();
             }
+            if (GUILayout.Button("清理生成包", GUILayout.Height(28)))
+                CleanGeneratedPackage();
             EditorGUILayout.EndHorizontal();
             if (!string.IsNullOrEmpty(_summary))
                 EditorGUILayout.HelpBox(_summary, MessageType.Info);
@@ -102,16 +104,22 @@ namespace CoffeeBean
             // 生成选项
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("生成选项", EditorStyles.boldLabel);
-            _outputFolder = EditorGUILayout.TextField("代码输出目录", _outputFolder);
-            _jsonResourcesFolder = EditorGUILayout.TextField("JSON Resources 目录", _jsonResourcesFolder);
-            _resourcesPath = EditorGUILayout.TextField("Resources 相对路径", _resourcesPath);
+            _codeFolder = EditorGUILayout.TextField("代码包目录（内嵌包）", _codeFolder);
+            _packageName = EditorGUILayout.TextField("包名（= StreamingAssets 子目录）", _packageName);
             _namespace = EditorGUILayout.TextField("命名空间", _namespace);
             _primaryKey = EditorGUILayout.TextField("主键列（空 = 自动）", _primaryKey);
             EditorGUILayout.BeginHorizontal();
-            _generateJson = EditorGUILayout.Toggle("生成 JSON", _generateJson);
+            _generateData = EditorGUILayout.Toggle("生成数据", _generateData);
             _generateClass = EditorGUILayout.Toggle("生成 C# 类 + Getter", _generateClass);
-            _encryptJson = EditorGUILayout.Toggle("加密 JSON", _encryptJson);
+            _compressData = EditorGUILayout.Toggle("压缩数据", _compressData);
+            _encryptData = EditorGUILayout.Toggle("加密数据", _encryptData);
             EditorGUILayout.EndHorizontal();
+            EditorGUILayout.LabelField(
+                "产物布局：<包目录>/<表>/Code/*.cs 与 <包目录>/<表>/Data/<表>" + CExcelDataContainer.Extension +
+                "（都在 Assets 之外；打包时由构建钩子把各 Data 目录挂进 StreamingAssets）。",
+                EditorStyles.wordWrappedMiniLabel);
+            if (!string.Equals(System.IO.Path.GetFileName(_codeFolder), _packageName, System.StringComparison.Ordinal))
+                EditorGUILayout.HelpBox("包名与代码包目录的末级目录名不一致 —— 构建钩子与运行时会错位，请保持一致。", MessageType.Warning);
 
             // 严格类型校验：生成前每格按声明类型真解析，填错直接报第几行第几列（不再安静地写成 0）
             _strictTypeCheck = EditorGUILayout.ToggleLeft(
@@ -148,11 +156,11 @@ namespace CoffeeBean
             if (GUILayout.Button("保存选项", GUILayout.Height(22)))
             {
                 EditorPrefs.SetString(PrefFolder, _folder);
-                EditorPrefs.SetString(PrefOutputFolder, _outputFolder);
+                EditorPrefs.SetString(PrefCodeFolder, _codeFolder);
+                EditorPrefs.SetString(PrefPackageName, _packageName);
                 EditorPrefs.SetString(PrefNamespace, _namespace);
-                EditorPrefs.SetString(PrefJsonResources, _jsonResourcesFolder);
-                EditorPrefs.SetString(PrefResourcesPath, _resourcesPath);
-                EditorPrefs.SetBool(PrefEncryptJson, _encryptJson);
+                EditorPrefs.SetBool(PrefCompressData, _compressData);
+                EditorPrefs.SetBool(PrefEncryptData, _encryptData);
                 EditorPrefs.SetBool(PrefStrictTypeCheck, _strictTypeCheck);
                 EditorPrefs.SetString(PrefArraySeparators, _arraySeparators);
                 EditorPrefs.SetBool(PrefSkipRowsWithoutKey, _skipRowsWithoutKey);
@@ -198,6 +206,43 @@ namespace CoffeeBean
             }
         }
 
+        /// <summary>
+        /// 删除整个生成包目录。
+        ///
+        /// **为什么需要它**：生成器只写自己的产物，**不清理上一版留下的文件**。产物命名/布局一旦变化
+        /// （例如 0.6.0 把 `前缀_1Config` 改成 `前缀Chapter1`），旧文件会与新文件共存并引用已不存在的类型，
+        /// 直接编译不过。这时正确的做法是"清包 + 重新生成"，而不是手工去 Assets 里挑文件。
+        ///
+        /// 会一并删除该目录里的手工定制（如自定义 asmdef / package.json），所以必须二次确认。
+        /// </summary>
+        private void CleanGeneratedPackage()
+        {
+            if (string.IsNullOrEmpty(_codeFolder))
+            {
+                EditorUtility.DisplayDialog("清理生成包", "代码包目录为空", "确定");
+                return;
+            }
+
+            string full = System.IO.Path.GetFullPath(_codeFolder);
+            bool exists = Directory.Exists(full);
+            if (!EditorUtility.DisplayDialog("清理生成包",
+                    (exists ? "将删除整个生成包目录：\n" + full : "该目录不存在：\n" + full) +
+                    "\n\n注意：放在该目录里的手工定制（自定义 asmdef / package.json 等）也会一并删除。" +
+                    "\n删完记得重新生成一次。", "删除", "取消"))
+                return;
+
+            if (exists)
+            {
+                Directory.Delete(full, true);
+                AssetDatabase.Refresh();
+                _summary = "已清理生成包：" + full;
+            }
+            else
+            {
+                _summary = "生成包目录不存在：" + full;
+            }
+        }
+
         private void GenerateAll(bool force)
         {
             if (string.IsNullOrEmpty(_folder) || !Directory.Exists(_folder))
@@ -210,18 +255,28 @@ namespace CoffeeBean
 
             var options = new CExcelGenerateOptions
             {
-                OutputFolder = _outputFolder,
+                CodeFolder = _codeFolder,
+                PackageName = _packageName,
                 Namespace = _namespace,
                 PrimaryKey = string.IsNullOrWhiteSpace(_primaryKey) ? null : _primaryKey,
-                GenerateJson = _generateJson,
+                GenerateData = _generateData,
                 GenerateClass = _generateClass,
-                JsonResourcesFolder = _jsonResourcesFolder,
-                ResourcesPath = _resourcesPath,
-                EncryptJson = _encryptJson,
+                CompressData = _compressData,
+                EncryptData = _encryptData,
                 StrictTypeCheck = _strictTypeCheck,
                 ArraySeparators = _arraySeparators,
                 SkipRowsWithoutKey = _skipRowsWithoutKey,
             };
+
+            // 包名非法直接拦下：UPM 解析失败会让整个工程打不开（实测），别等生成完才发现
+            string packageNameError = CExcelGenerator.ValidatePackageName(_packageName);
+            if (packageNameError != null)
+            {
+                EditorUtility.DisplayDialog("包名非法",
+                    "包名 \"" + _packageName + "\" 不合法：" + packageNameError +
+                    "\n\n非法包名会让 UPM 解析失败、整个工程都打不开，已中止生成。", "确定");
+                return;
+            }
 
             int generated = 0, skipped = 0, failed = 0;
             var sw = System.Diagnostics.Stopwatch.StartNew();
