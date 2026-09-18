@@ -171,6 +171,43 @@ namespace CoffeeBean.Excel.Tests
                 "超出 int32 的值要报（以前会溢出）：" + string.Join("\n", result.Issues));
         }
 
+        /// <summary>
+        /// 字典列必须带上 `using System.Collections.Generic;` ——
+        /// `Dictionary&lt;,&gt;` 是唯一没写全名的类型，这条是把生成产物**真丢进工程编译**才发现的（CS0246）。
+        /// </summary>
+        [Test]
+        public void DictionaryColumn_EmitsTheGenericCollectionsUsing()
+        {
+            CExcelGenerateResult result = Generate(new[]
+            {
+                CExcelTestFactory.Row("ID_i", 1, "Attrs_kv", "atk=10;hp=20"),
+            });
+
+            Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
+            string classText = File.ReadAllText(Path.Combine(_tmpOut, "Building.cs"));
+            StringAssert.Contains("using System.Collections.Generic;", classText);
+            StringAssert.Contains("public Dictionary<string,string> Attrs;", classText);
+
+            // 没有字典列的表不该多这一行（生成代码保持干净）
+            CExcelGenerateResult plain = Generate(new[] { CExcelTestFactory.Row("ID_i", 1, "Name_s", "A") });
+            Assert.IsTrue(plain.Success, string.Join("\n", plain.Issues));
+            StringAssert.DoesNotContain("using System.Collections.Generic;", File.ReadAllText(Path.Combine(_tmpOut, "Building.cs")));
+        }
+
+        /// <summary>两个列名去后缀后撞成同一个字段名 → 生成前就报（否则是看不懂的 CS0102/CS0101）。</summary>
+        [Test]
+        public void DuplicateFieldNames_AreReportedBeforeGeneration()
+        {
+            CExcelGenerateResult result = Generate(new[]
+            {
+                CExcelTestFactory.Row("ID_i", 1, "State_e", "green", "State_ea", "green;idle"),
+            });
+
+            Assert.IsFalse(result.Success);
+            Assert.IsTrue(result.Issues.Exists(i => i.Level == CExcelIssueLevel.Error && i.Message.Contains("同名字段")),
+                string.Join("\n", result.Issues));
+        }
+
         private static int CountOccurrences(string text, string sub)
         {
             int count = 0, idx = 0;

@@ -767,6 +767,26 @@ namespace CoffeeBean
             }
         }
 
+        /// <summary>
+        /// 数据类需要的 using。
+        /// `Dictionary<,>` 是唯一一个**没写全名**的类型（其它 System.* / UnityEngine.* 都写全名），
+        /// 所以只有表里有字典列时才补 `System.Collections.Generic` ——
+        /// 这条是**把生成产物真丢进工程编译**才发现的（少了它 → CS0246）。
+        /// </summary>
+        private static void AppendUsings(StringBuilder sb, CExcelTable table)
+        {
+            sb.AppendLine("using System;");
+            foreach (string column in table.Columns)
+            {
+                if (!table.Kinds.TryGetValue(column, out CExcelFieldKind kind)) continue;
+                CExcelFieldKind element = CExcelTypeInfer.IsArray(kind) ? CExcelTypeInfer.ElementKind(kind) : kind;
+                if (element == CExcelFieldKind.Dictionary)
+                {
+                    sb.AppendLine("using System.Collections.Generic;");
+                    return;
+                }
+            }
+        }
         // ========== 普通单表：数据类 ==========
 
         private static string WriteClass(CExcelTable table, string className, string ns)
@@ -775,7 +795,7 @@ namespace CoffeeBean
             sb.AppendLine(HeaderLine);
             sb.AppendLine(TemplateLine);
             sb.AppendLine("// Source sheet: " + table.SheetName);
-            sb.AppendLine("using System;");
+            AppendUsings(sb, table);
             sb.AppendLine();
             sb.AppendLine("namespace " + ns);
             sb.AppendLine("{");
@@ -799,7 +819,7 @@ namespace CoffeeBean
             sb.AppendLine(HeaderLine);
             sb.AppendLine(TemplateLine);
             sb.AppendLine("// Multi-chapter base: " + frontName + " (sheets like " + frontName + "_1, " + frontName + "_2 ...)");
-            sb.AppendLine("using System;");
+            AppendUsings(sb, table);
             sb.AppendLine();
             sb.AppendLine("namespace " + ns);
             sb.AppendLine("{");

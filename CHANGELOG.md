@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.5.2] - 2026-09-18
+
+### Fixed
+把生成产物**真丢进一个 Unity 工程编译**（不只是文本断言）后抓到两个问题：
+
+1. **含字典列（`_kv`）的表生成的代码编译不过**（CS0246）：`Dictionary<,>` 是唯一没写全名的类型
+   （其它 `System.*` / `UnityEngine.*` 都写全名），生成的数据类少了 `using System.Collections.Generic;`。
+   现在只在表里真有字典列时补这一行（没有就不加，生成代码保持干净）。
+   > 教训：光断言"生成文本里有 …"不够，得让编译器说话。以后模板改动都过一遍真编译。
+2. **两个列名去后缀后撞成同一个字段名**（`State_e` + `State_ea`，或 `Name_s` + `Name_i`）会在生成代码里
+   变成两个同名字段 + 两个同名枚举类型（CS0102 / CS0101），报错信息完全看不出根因。
+   现在生成前就报："列 X 与 Y 去掉类型后缀后都是字段 Z"。
+
+### Tests
+- excel 测试 134 → **136**（全绿）。新增：字典列必须带 `using System.Collections.Generic;`（没有字典列则不加）、
+  同名字段在生成前报错。
+- 另外做了一次**真编译验证**：把生成产物（BigInteger / decimal / DateTime / TimeSpan / Guid / Vector3 /
+  Color / Rect / Quaternion / Dictionary / 生成的枚举 + [Flags] / 章节基类与子类 / Newtonsoft Getter）
+  放进 dev 工程 `Assets/` 下编译通过 —— 同时验证了生成的 asmdef（`overrideReferences: false`）
+  确实能自动引用 Newtonsoft 插件 DLL。
+
 ## [0.5.1] - 2026-09-18
 
 ### Fixed

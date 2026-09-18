@@ -21,6 +21,8 @@ namespace CoffeeBean
             char[] separators = CExcelCellJson.Separators(options != null ? options.ArraySeparators : null);
             bool strictTypeCheck = options == null || options.StrictTypeCheck;
 
+            CheckDuplicateFieldNames(table, issues);
+
             foreach (string column in table.Columns)
             {
                 if (!table.Kinds.TryGetValue(column, out CExcelFieldKind kind)) continue;
@@ -65,6 +67,35 @@ namespace CoffeeBean
                         Column = column,
                         Message = $"{DeclaredName(kind, enumDef)} 列填的值不合法：{error}",
                     });
+                }
+            }
+        }
+
+        /// <summary>
+        /// 两个列名去掉后缀后撞成同一个字段名 → 生成的 C# 类会有两个同名字段（CS0102），
+        /// 而且它们的枚举类型名也会撞（CS0101）。典型长相：`State_e` + `State_ea`，或 `Name_s` + `Name_i`。
+        /// 这类错在生成代码里很难看出根因，所以在生成前就指名道姓报出来。
+        /// </summary>
+        private static void CheckDuplicateFieldNames(CExcelTable table, List<CExcelIssue> issues)
+        {
+            var byField = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (string column in table.Columns)
+            {
+                string field = CExcelTypeInfer.ToFieldName(column);
+                if (byField.TryGetValue(field, out string first))
+                {
+                    issues.Add(new CExcelIssue
+                    {
+                        Level = CExcelIssueLevel.Error,
+                        Row = 0,
+                        Column = column,
+                        Message = $"列 {first} 与 {column} 去掉类型后缀后都是字段 \"{field}\" —— 生成的数据类会有两个同名字段（C# 直接编译不过）。" +
+                                  "请把其中一个列名改掉（例如 State_e / States_ea）。",
+                    });
+                }
+                else
+                {
+                    byField[field] = column;
                 }
             }
         }
