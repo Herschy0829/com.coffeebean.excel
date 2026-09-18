@@ -17,8 +17,8 @@ namespace CoffeeBean.Excel.Tests
         {
             _tmpXlsx = CExcelTestFactory.CreateTempTable(new[]
             {
-                CExcelTestFactory.Row("Id_i", 1, "Name_s", "新手礼包", "Price_f", 6.5, "Rewards_ia", "100;200;300", "Enabled_b", 1),
-                CExcelTestFactory.Row("Id_i", 2, "Name_s", "月卡", "Price_f", 30.0, "Rewards_ia", "500", "Enabled_b", 0),
+                CExcelTestFactory.Row("Id_i", 1, "Name_s", "新手礼包", "Price_f", 6.5, "Rewards_ia", "100;200;300", "Enabled_bool", "true", "Gold_b", "12345678901234567890"),
+                CExcelTestFactory.Row("Id_i", 2, "Name_s", "月卡", "Price_f", 30.0, "Rewards_ia", "500", "Enabled_bool", "false", "Gold_b", "999"),
             }, "coffeebean_gen");
             _tmpOut = Path.Combine(Path.GetTempPath(), "coffeebean_gen_out_" + Guid.NewGuid().ToString("N"));
         }
@@ -147,15 +147,18 @@ namespace CoffeeBean.Excel.Tests
             StringAssert.StartsWith("{\"data\":[", json);
             Assert.AreEqual(2, CountOccurrences(json, "\"Id\":"), "应有 2 行数据");
 
-            // 用 JsonUtility 验证可解析（包装对象）
-            Wrapper probe = JsonUtility.FromJson<Wrapper>(json);
+            // 用 Newtonsoft 验证可解析（包装对象）—— 生成的 Getter 用的就是这条路径
+            Wrapper probe = (Wrapper)CExcelJsonBackend.Deserialize(json, typeof(Wrapper));
             Assert.IsNotNull(probe);
+            Assert.IsNotNull(probe.data, "data 字段必须读出来（null 说明字段名/形状对不上）");
             Assert.AreEqual(2, probe.data.Count);
             Assert.AreEqual(1, probe.data[0].Id);
             Assert.AreEqual("新手礼包", probe.data[0].Name);
             Assert.AreEqual(3, probe.data[0].Rewards.Length);
             Assert.AreEqual(100, probe.data[0].Rewards[0]);
             Assert.IsTrue(probe.data[0].Enabled);
+            Assert.AreEqual("12345678901234567890", probe.data[0].Gold.ToString(),
+                "大整数必须一位不差地读回来（这正是 JsonUtility 做不到、必须换 Newtonsoft 的原因）");
         }
 
         [Test]
@@ -170,7 +173,10 @@ namespace CoffeeBean.Excel.Tests
             StringAssert.Contains("public float Price;", classText);
             StringAssert.Contains("public int[] Rewards;", classText);
             StringAssert.Contains("public bool Enabled;", classText);
+            StringAssert.Contains("public System.Numerics.BigInteger Gold;", classText);
             StringAssert.Contains("namespace Config", classText);
+            StringAssert.Contains("// Generator template: v" + CExcelGenerator.TemplateVersion, classText,
+                "产物里要能看出是哪版模板生成的（增量生成器按它判断要不要重新生成）");
         }
 
         [Test]
@@ -181,8 +187,12 @@ namespace CoffeeBean.Excel.Tests
 
             StringAssert.Contains("public static TestTable Get(int key)", getterText);
             StringAssert.Contains("Resources.Load<TextAsset>", getterText);
-            StringAssert.Contains("JsonUtility.FromJson<Wrapper>", getterText);
+            StringAssert.Contains("using Newtonsoft.Json;", getterText, "生成的 Getter 用 Newtonsoft 反序列化");
+            StringAssert.Contains("JsonConvert.DeserializeObject<Wrapper>", getterText);
+            StringAssert.Contains("wrapper.data != null", getterText, "data 为 null 时要兜住（Newtonsoft 不会给空 List）");
             StringAssert.Contains("item.Id", getterText, "主键索引应按 Id 建立");
+            StringAssert.Contains("public sealed class Wrapper", getterText,
+                "Wrapper 必须是 public：Newtonsoft 要能构造它，私有嵌套类型不可靠");
         }
 
         [Test]
@@ -278,19 +288,20 @@ namespace CoffeeBean.Excel.Tests
         }
 
         [Serializable]
-        private sealed class Wrapper
+        public sealed class Wrapper
         {
             public List<Row> data;
         }
 
         [Serializable]
-        private sealed class Row
+        public sealed class Row
         {
             public int Id;
             public string Name;
             public float Price;
             public int[] Rewards;
             public bool Enabled;
+            public object Gold;
         }
     }
 }

@@ -20,6 +20,8 @@ namespace CoffeeBean
         private const string PrefNamespace = "CoffeeBean.Excel.Namespace";
         private const string PrefJsonResources = "CoffeeBean.Excel.JsonResourcesFolder";
         private const string PrefResourcesPath = "CoffeeBean.Excel.ResourcesPath";
+        private const string PrefEncryptJson = "CoffeeBean.Excel.EncryptJson";
+        private const string PrefStrictTypeCheck = "CoffeeBean.Excel.StrictTypeCheck";
 
         private string _folder;
         private string _outputFolder = "Assets/Configs/Generated";
@@ -30,6 +32,7 @@ namespace CoffeeBean
         private bool _generateJson = true;
         private bool _generateClass = true;
         private bool _encryptJson = true;
+        private bool _strictTypeCheck = true;
 
         private readonly List<FileStatus> _files = new List<FileStatus>();
         private Vector2 _scroll;
@@ -53,6 +56,8 @@ namespace CoffeeBean
             _namespace = EditorPrefs.GetString(PrefNamespace, "CoffeeBean");
             _jsonResourcesFolder = EditorPrefs.GetString(PrefJsonResources, "Assets/Resources/Configs");
             _resourcesPath = EditorPrefs.GetString(PrefResourcesPath, "Configs");
+            _encryptJson = EditorPrefs.GetBool(PrefEncryptJson, true);
+            _strictTypeCheck = EditorPrefs.GetBool(PrefStrictTypeCheck, true);
             RefreshFileList();
         }
 
@@ -101,6 +106,23 @@ namespace CoffeeBean
             _generateClass = EditorGUILayout.Toggle("生成 C# 类 + Getter", _generateClass);
             _encryptJson = EditorGUILayout.Toggle("加密 JSON", _encryptJson);
             EditorGUILayout.EndHorizontal();
+
+            // 严格类型校验：生成前每格按声明类型真解析，填错直接报第几行第几列（不再安静地写成 0）
+            _strictTypeCheck = EditorGUILayout.ToggleLeft(
+                "严格类型校验（推荐）—— 值不符合列类型就报错中止该表，不静默写 0", _strictTypeCheck);
+
+            // 生成代码用 Newtonsoft 反序列化，缺包会编译不过 —— 提前告知
+            if (!CExcelJsonBackend.IsAvailable)
+            {
+                EditorGUILayout.HelpBox("JSON 后端：" + CExcelJsonBackend.Describe(), MessageType.Error);
+                EditorGUILayout.BeginHorizontal();
+                if (GUILayout.Button("打开 Package Manager", GUILayout.Height(22)))
+                    EditorApplication.ExecuteMenuItem("Window/Package Manager");
+                if (GUILayout.Button("复制包名", GUILayout.Width(90), GUILayout.Height(22)))
+                    EditorGUIUtility.systemCopyBuffer = CExcelJsonBackend.PackageName;
+                EditorGUILayout.EndHorizontal();
+            }
+
             if (GUILayout.Button("保存选项", GUILayout.Height(22)))
             {
                 EditorPrefs.SetString(PrefFolder, _folder);
@@ -108,7 +130,8 @@ namespace CoffeeBean
                 EditorPrefs.SetString(PrefNamespace, _namespace);
                 EditorPrefs.SetString(PrefJsonResources, _jsonResourcesFolder);
                 EditorPrefs.SetString(PrefResourcesPath, _resourcesPath);
-                EditorPrefs.SetBool("CoffeeBean.Excel.EncryptJson", _encryptJson);
+                EditorPrefs.SetBool(PrefEncryptJson, _encryptJson);
+                EditorPrefs.SetBool(PrefStrictTypeCheck, _strictTypeCheck);
             }
 
             // 表状态列表
@@ -171,6 +194,7 @@ namespace CoffeeBean
                 JsonResourcesFolder = _jsonResourcesFolder,
                 ResourcesPath = _resourcesPath,
                 EncryptJson = _encryptJson,
+                StrictTypeCheck = _strictTypeCheck,
             };
 
             int generated = 0, skipped = 0, failed = 0;

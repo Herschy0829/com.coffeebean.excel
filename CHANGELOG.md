@@ -1,5 +1,74 @@
 # Changelog
 
+## [0.5.0] - 2026-09-18
+
+### ⚠ 破坏性变更（升级必读）
+
+1. **`_b` 从 bool 改成 `BigInteger`**（大整数），布尔改用 **`_bool` / `_boola`**。
+   - 老表里 `Enabled_b` 填 `true/false` 的地方现在会报"不是整数"，并且会额外给一条**迁移警告**
+     （"这看起来是旧版 bool 用法，请改用 `_bool`"），不是让你自己猜。
+   - 数字类型的 `_b` 列请把单元格设成**文本格式**：Excel 数字格式只保留 15 位有效数字。
+2. **生成的 Getter 改用 Newtonsoft.Json 反序列化**（原来是 `JsonUtility`）——
+   因为 JsonUtility 读不回 `BigInteger` / `decimal` / `DateTime` / `Guid` / `Dictionary` / `Rect`（实测全是 `{}`）。
+   本包 `package.json` 新增依赖 `com.unity.nuget.newtonsoft-json`；生成的 JSON **格式不变**（仍是 `{"data":[...]}`）。
+3. **增量生成带上模板版本**：升级到本版后，所有表会**自动重新生成一次**（否则"表没改"会一直跳过，产物停在旧模板）。
+
+### Added
+- **列类型从 6 种扩到 27 种**（数组后缀 = 标量后缀 + `a`）：
+  - 整数：`_i` `_l` **`_b`(BigInteger)** `_by` `_sb` `_sh` `_us` `_u` `_ul`
+  - 小数：`_f` `_d` **`_dec`(decimal)**
+  - 布尔/文本：`_bool` `_s` `_c`
+  - 时间/标识：`_time` `_span` `_guid`
+  - 枚举：`_e`（表内生成）、`_e:类型`（引用已编译枚举）、`_flags` / `_flags:类型`
+  - 结构：`_v2` `_v3` `_v4` `_quat` `_color` `_rect`
+  - 复合：`_kv`（`Dictionary<string,string>`）
+- **枚举生成**（`_e` / `_ea`）：不带值从 0 起按首次出现顺序自动编号；`green_3` = 显式值 3（按**最后一个下划线**拆，
+  所以 `fire_dragon` 是完整名字）；生成 `名字 = 表名 + 字段名` 的枚举（`Building` 的 `State_e` → `BuildingState`）。
+  成员名自动转 PascalCase（改名会给警告），`_flags` 用 `|` 组合、JSON 存按位或的数字。
+- **枚举校验**（全部是错误级、阻塞生成）：
+  - 「**不能有同一枚举值**」（两个成员同值）、同名被赋两个不同的值、取值取不出合法成员名、枚举列一个取值都没有；
+  - 引用模式 `_e:类型` 会按**已编译的枚举**校验类型与成员是否存在（找不到会列出可用成员）；
+  - **跨表重名**（同名枚举成员不一致会生成重复 C# 类型 CS0101）在**同一文件和跨文件**都会拦下。
+- **章节表枚举取并集**：`前缀_数字` 组内各章节的枚举取值合并后统一编号（不是各建一套），
+  枚举类型用章节前缀命名、定义写在基类文件里，各章节共用。
+- **严格类型校验**（`CExcelGenerateOptions.StrictTypeCheck`，默认开）：生成前每个单元格都按列声明类型真解析，
+  填错就报**第几行第几列**并中止该表。以前 `Level_i` 填 `abc` 会被**安静地写成 0**，
+  `Gold_b` 被 Excel 记成科学计数法会变成完全不同的数 —— 这类静默错数据比编译错误难查得多。
+  老表迁移期可在窗口里关掉。
+- **「类型映射说明」窗口全面升级**：按「整数 / 小数 / 布尔 / 文本 / 时间 / 枚举 / 结构 / 复合」分组渲染，
+  可切换是否显示数组行，新增「枚举怎么写」专节（含完整例子），并可一键复制整张表为纯文本。
+  还加了后端状态提示（没装 Newtonsoft 会红字提示 + 一键打开 Package Manager）。
+
+### Changed
+- `CExcelEnumBuilder` / `CExcelEnumResolver` / `CExcelEnumRegistry`：枚举定义构建、已编译枚举查找（带缓存）、
+  一次生成内的重名登记。
+- `CExcelCellJson`：**手写** JSON 字面量（校验与生成共用同一实现，所以"校验通过"一定"生成得出来"）。
+  不用 `JsonConvert.SerializeObject`：它序列化 `Vector3`/`Rect` 会因 `normalized`/`center` 自引用直接抛异常。
+- `CExcelTableValidator`：表级校验（值 + 枚举 + `_b` 迁移提示）。
+- 生成的 Wrapper 从 `private` 改成 `public`：Newtonsoft 要能构造它（私有嵌套类型不可靠）。
+- 生成产物文件头新增 `// Generator template: v2 (JSON backend: Newtonsoft.Json)`，能直接看出是哪版模板生成的。
+- `GenerateFolder` / `GenerateAllSheets` / `Generate` 共享一次运行的**读结果缓存**与**枚举登记表**
+  （章节表要读两遍：建枚举并集 + 生成）。
+- 无后缀推断更保守：**整数但超出 `long` → string**（原来会掉进 double 静默丢精度），要大整数请显式写 `_b`。
+- 数组分隔符按元素类型区分：向量/四元数/颜色/矩形**只能用 `;`**（元素内部就是逗号）；
+  字典数组用 `|` 分组；`[Flags]` 数组先 `;` 拆元素、元素内再用 `|` 组合。
+- 自动选主键时**排除数组列**（原来 `Tags_sa` 也会被当成主键列）。
+- `CExcelGenerator.Validate(path, sheet, options)`：只校验不生成（预览窗口的"校验"按钮现在会做**真类型校验**）。
+- 窗口：新增"严格类型校验"开关与后端状态；单文件预览窗口的"校验（不生成）"会跑真校验。
+- `docs/design-excel.md` 按 v0.5.0 重写（类型表 / 枚举 / JSON 后端选型 / 踩坑记录）。
+
+### Tests
+- excel 测试 65 → **124**（全绿）。新增：
+  - `CExcelJsonBackendTests`：**逐类型真反序列化**（单元格示例 → JSON → 真实 `JsonConvert.DeserializeObject`），
+    并锁住"JsonUtility 读不回哪些"、"BigInteger 科学计数法有损"、颜色三种写法一致、四元数 4 数 vs 欧拉角、
+    数组分隔符规则、空值默认值、转义、范围越界报错。
+  - `CExcelEnumDefTests`：自动编号 / 显式值 / 拆分规则 / 成员名规范化 + 全部校验分支 + 引用模式 + 跨表重名 + 章节并集。
+  - `CExcelEnumGenerationTests`：枚举端到端（生成枚举/字段/JSON 数字）、引用模式、`_flags`、`_flagsa`、
+    章节并集、坏值报行号列名、`StrictTypeCheck=false` 降级、`_b` 迁移提示、空值默认。
+- 记录了实测到的 Unity 行为：**普通 asmdef 会自动引用插件，测试程序集不会**
+  （`optionalUnityReferences: ["TestAssemblies"]` 的 asmdef 拿不到 Newtonsoft）——
+  所以测试通过编辑器程序集里的 `CExcelJsonBackend`（反射）走真实反序列化，而不是直接 `using Newtonsoft.Json`。
+
 ## [0.4.0] - 2026-09-18
 
 ### Added

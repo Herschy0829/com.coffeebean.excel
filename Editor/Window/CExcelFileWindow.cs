@@ -14,6 +14,8 @@ namespace CoffeeBean
         private List<string> _sheets = new List<string>();
         private int _sheetIndex;
         private CExcelReadResult _preview;
+        private List<CExcelIssue> _validationIssues = new List<CExcelIssue>();
+        private bool _validated;
         private Vector2 _scroll;
 
         public static void Open(string excelPath)
@@ -54,6 +56,8 @@ namespace CoffeeBean
             if (newIndex != _sheetIndex)
             {
                 _sheetIndex = newIndex;
+                _validated = false;
+                _validationIssues.Clear();
                 RefreshPreview();
             }
             if (GUILayout.Button("预览", GUILayout.Width(60))) RefreshPreview();
@@ -76,47 +80,67 @@ namespace CoffeeBean
                     values.Add(row.TryGetValue(column, out object v) ? v : null);
                 CExcelFieldKind kind = CExcelTypeInfer.Infer(column, values);
                 string comment = _preview.ColumnComments.TryGetValue(column, out string c) ? c : string.Empty;
-                EditorGUILayout.LabelField($"  {column}  →  {CExcelTypeInfer.CSharpType(kind)}" + (comment.Length > 0 ? "    （" + comment + "）" : ""));
+                EditorGUILayout.LabelField($"  {column}  →  {CExcelTypeInfer.DescribeType(column, kind)}" + (comment.Length > 0 ? "    （" + comment + "）" : ""));
             }
             EditorGUILayout.EndScrollView();
 
-            // 问题列表
-            if (_preview.Issues.Count > 0)
+            // 问题列表（读取问题 + 类型校验问题）
+            var all = new List<CExcelIssue>();
+            all.AddRange(_preview.Issues);
+            all.AddRange(_validationIssues);
+            if (all.Count > 0)
             {
-                EditorGUILayout.LabelField($"问题（{_preview.Issues.Count}）", EditorStyles.boldLabel);
-                foreach (CExcelIssue issue in _preview.Issues)
+                EditorGUILayout.LabelField($"问题（{all.Count}）", EditorStyles.boldLabel);
+                foreach (CExcelIssue issue in all)
                 {
                     EditorGUILayout.HelpBox(issue.ToString(),
                         issue.Level == CExcelIssueLevel.Error ? MessageType.Error : MessageType.Warning);
                 }
             }
+            else if (_validated)
+            {
+                EditorGUILayout.HelpBox("校验通过：类型全部匹配，可以生成。", MessageType.Info);
+            }
 
             // 操作
             EditorGUILayout.Space(6);
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("校验（不生成）", GUILayout.Height(26))) RefreshPreview();
+            if (GUILayout.Button("校验（不生成）", GUILayout.Height(26))) RunValidation();
             if (GUILayout.Button("生成此 sheet", GUILayout.Height(26))) GenerateCurrent();
             EditorGUILayout.EndHorizontal();
         }
 
+        /// <summary>真校验：按列声明类型逐格解析 + 建枚举定义（只读，不写文件）。</summary>
+        private void RunValidation()
+        {
+            RefreshPreview();
+            if (_preview == null || _sheets.Count == 0) return;
+            _validationIssues = CExcelGenerator.Validate(_path, _sheets[_sheetIndex], BuildOptions());
+            _validated = true;
+        }
+
+        private static CExcelGenerateOptions BuildOptions(string sheetName = null)
+            => new CExcelGenerateOptions
+            {
+                OutputFolder = EditorPrefs.GetString("CoffeeBean.Excel.OutputFolder", "Assets/Configs/Generated"),
+                Namespace = EditorPrefs.GetString("CoffeeBean.Excel.Namespace", "CoffeeBean"),
+                SheetName = sheetName,
+                JsonResourcesFolder = EditorPrefs.GetString("CoffeeBean.Excel.JsonResourcesFolder", "Assets/Resources/Configs"),
+                ResourcesPath = EditorPrefs.GetString("CoffeeBean.Excel.ResourcesPath", "Configs"),
+                EncryptJson = EditorPrefs.GetBool("CoffeeBean.Excel.EncryptJson", true),
+                StrictTypeCheck = EditorPrefs.GetBool("CoffeeBean.Excel.StrictTypeCheck", true),
+            };
+
         private void GenerateCurrent()
         {
-            if (_preview == null || _preview.HasBlockingErrors)
+            RunValidation();
+            if (_preview == null || _validationIssues.Exists(i => i.Level == CExcelIssueLevel.Error))
             {
                 EditorUtility.DisplayDialog("Excel 预览/校验", "存在阻塞性错误，无法生成（见问题列表）", "确定");
                 return;
             }
 
-            var options = new CExcelGenerateOptions
-            {
-                OutputFolder = EditorPrefs.GetString("CoffeeBean.Excel.OutputFolder", "Assets/Configs/Generated"),
-                Namespace = EditorPrefs.GetString("CoffeeBean.Excel.Namespace", "CoffeeBean"),
-                SheetName = _sheets[_sheetIndex],
-                JsonResourcesFolder = EditorPrefs.GetString("CoffeeBean.Excel.JsonResourcesFolder", "Assets/Resources/Configs"),
-                ResourcesPath = EditorPrefs.GetString("CoffeeBean.Excel.ResourcesPath", "Configs"),
-                EncryptJson = EditorPrefs.GetBool("CoffeeBean.Excel.EncryptJson", true),
-            };
-            CExcelGenerateResult result = CExcelGenerator.Generate(_path, options);
+            CExcelGenerateResult result = CExcelGenerator.Generate(_path, BuildOptions(_sheets[_sheetIndex]));
             if (result.Success)
             {
                 AssetDatabase.Refresh();
