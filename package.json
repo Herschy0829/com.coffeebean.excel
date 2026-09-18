@@ -1,6 +1,6 @@
 {
   "name": "com.coffeebean.excel",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "displayName": "CoffeeBean Excel",
   "description": "Editor-only config-table toolchain for the CoffeeBean framework: Excel reading (MiniExcel) with header detection and aliases, a 27-kind column type table (int/long/BigInteger/decimal/bool/string/char/DateTime/TimeSpan/Guid/enum/[Flags]/byte../ulong/Vector2-4/Quaternion/Color/Rect/Dictionary + array suffixes), strict per-cell type validation, generated enums, and generation of JSON + C# data classes + getters. Generated getters deserialize with Newtonsoft.Json. Editor-only, no runtime code; optionally integrated with com.coffeebean.core for module discovery and version checks.",
   "unity": "6000.0",

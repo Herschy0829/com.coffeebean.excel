@@ -22,6 +22,8 @@ namespace CoffeeBean
         private const string PrefResourcesPath = "CoffeeBean.Excel.ResourcesPath";
         private const string PrefEncryptJson = "CoffeeBean.Excel.EncryptJson";
         private const string PrefStrictTypeCheck = "CoffeeBean.Excel.StrictTypeCheck";
+        private const string PrefArraySeparators = "CoffeeBean.Excel.ArraySeparators";
+        private const string PrefSkipRowsWithoutKey = "CoffeeBean.Excel.SkipRowsWithoutKey";
 
         private string _folder;
         private string _outputFolder = "Assets/Configs/Generated";
@@ -33,6 +35,8 @@ namespace CoffeeBean
         private bool _generateClass = true;
         private bool _encryptJson = true;
         private bool _strictTypeCheck = true;
+        private string _arraySeparators = CExcelCellJson.DefaultArraySeparators;
+        private bool _skipRowsWithoutKey = true;
 
         private readonly List<FileStatus> _files = new List<FileStatus>();
         private Vector2 _scroll;
@@ -58,6 +62,8 @@ namespace CoffeeBean
             _resourcesPath = EditorPrefs.GetString(PrefResourcesPath, "Configs");
             _encryptJson = EditorPrefs.GetBool(PrefEncryptJson, true);
             _strictTypeCheck = EditorPrefs.GetBool(PrefStrictTypeCheck, true);
+            _arraySeparators = EditorPrefs.GetString(PrefArraySeparators, CExcelCellJson.DefaultArraySeparators);
+            _skipRowsWithoutKey = EditorPrefs.GetBool(PrefSkipRowsWithoutKey, true);
             RefreshFileList();
         }
 
@@ -111,6 +117,22 @@ namespace CoffeeBean
             _strictTypeCheck = EditorGUILayout.ToggleLeft(
                 "严格类型校验（推荐）—— 值不符合列类型就报错中止该表，不静默写 0", _strictTypeCheck);
 
+            // 数组分隔符：默认带 `_`（真实项目里 13_100 / 0.2_0.8_1 这类写法最常见）
+            EditorGUILayout.BeginHorizontal();
+            _arraySeparators = EditorGUILayout.TextField("数组分隔符", _arraySeparators);
+            if (GUILayout.Button("恢复默认", GUILayout.Width(70)))
+                _arraySeparators = CExcelCellJson.DefaultArraySeparators;
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.LabelField(
+                "   数组元素分隔符（默认含 `_`：13_100 = [13,100]）。字符串数组的元素本身带下划线时，把 `_` 去掉。" +
+                "枚举数组永远不按 `_` 拆（`_` 是 \"名字_值\" 语法）。",
+                EditorStyles.wordWrappedMiniLabel);
+
+            // 主键无效行（说明行/图例行/草稿块）跳过 —— 会出警告并列出跳过的行号
+            _skipRowsWithoutKey = EditorGUILayout.ToggleLeft(
+                "跳过主键无效的行（推荐）—— 配置表里的说明/图例/草稿行主键是空的，不当数据行（会出警告列出行号）",
+                _skipRowsWithoutKey);
+
             // 生成代码用 Newtonsoft 反序列化，缺包会编译不过 —— 提前告知
             if (!CExcelJsonBackend.IsAvailable)
             {
@@ -132,6 +154,8 @@ namespace CoffeeBean
                 EditorPrefs.SetString(PrefResourcesPath, _resourcesPath);
                 EditorPrefs.SetBool(PrefEncryptJson, _encryptJson);
                 EditorPrefs.SetBool(PrefStrictTypeCheck, _strictTypeCheck);
+                EditorPrefs.SetString(PrefArraySeparators, _arraySeparators);
+                EditorPrefs.SetBool(PrefSkipRowsWithoutKey, _skipRowsWithoutKey);
             }
 
             // 表状态列表
@@ -195,6 +219,8 @@ namespace CoffeeBean
                 ResourcesPath = _resourcesPath,
                 EncryptJson = _encryptJson,
                 StrictTypeCheck = _strictTypeCheck,
+                ArraySeparators = _arraySeparators,
+                SkipRowsWithoutKey = _skipRowsWithoutKey,
             };
 
             int generated = 0, skipped = 0, failed = 0;

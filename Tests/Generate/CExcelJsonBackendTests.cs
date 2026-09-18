@@ -172,6 +172,61 @@ namespace CoffeeBean.Excel.Tests
             Assert.AreEqual("2", values[0]["hp"]);
         }
 
+        /// <summary>
+        /// **`_` 是默认数组分隔符**（真实项目里 `13_100` / `0.2_0.8_1` / `10001_10002` 是最常见的写法）。
+        /// 这条是拿真实配置表 dogfood 出来的：不带 `_` 的话这些表整列都读不出来。
+        /// </summary>
+        [Test]
+        public void UnderscoreIsAnArraySeparatorByDefault()
+        {
+            Assert.AreEqual("[13,100]", CExcelCellJson.Literal("13_100", CExcelFieldKind.IntArray, null, out string error), error);
+            Assert.AreEqual("[18,5,1,300,11,1,13,100]",
+                CExcelCellJson.Literal("18_5_1_300_11_1_13_100", CExcelFieldKind.IntArray, null, out _));
+            Assert.AreEqual("[0.2,0.8,1]", CExcelCellJson.Literal("0.2_0.8_1", CExcelFieldKind.FloatArray, null, out _));
+            Assert.AreEqual("[200,500]", CExcelCellJson.Literal("200_500", CExcelFieldKind.LongArray, null, out _));
+            Assert.AreEqual("[\"6006\",\"1\"]", CExcelCellJson.Literal("6006_1", CExcelFieldKind.StringArray, null, out _));
+
+            // 老写法（; , |）当然还要认
+            Assert.AreEqual("[1,2,3]", CExcelCellJson.Literal("1;2;3", CExcelFieldKind.IntArray, null, out _));
+            Assert.AreEqual("[1,2,3]", CExcelCellJson.Literal("1,2,3", CExcelFieldKind.IntArray, null, out _));
+            Assert.AreEqual("[1,2]", CExcelCellJson.Literal("1|2", CExcelFieldKind.IntArray, null, out _));
+
+            Assert.IsTrue(CExcelJsonProbe.IsValidJson(
+                CExcelCellJson.Literal("13_100", CExcelFieldKind.IntArray, null, out _)));
+        }
+
+        /// <summary>分隔符可配置：字符串数组元素本身带下划线时，把 `_` 去掉。</summary>
+        [Test]
+        public void ArraySeparatorsAreConfigurable()
+        {
+            char[] noUnderscore = CExcelCellJson.Separators(";,|");
+
+            Assert.AreEqual("[\"fire_dragon\",\"ice_wolf\"]",
+                CExcelCellJson.Literal("fire_dragon;ice_wolf", CExcelFieldKind.StringArray, null, noUnderscore, out _));
+            Assert.AreEqual("[\"fire\",\"dragon\"]",
+                CExcelCellJson.Literal("fire_dragon", CExcelFieldKind.StringArray, null, out _),
+                "默认含 `_` —— 所以字符串数组里想保留下划线就把 `_` 从分隔符集合里去掉");
+
+            // 空/null → 回落默认集合，不会变成"没有分隔符"
+            CollectionAssert.AreEqual(CExcelCellJson.Separators(null), CExcelCellJson.Separators(""));
+            Assert.AreEqual("[1,2]", CExcelCellJson.Literal("1_2", CExcelFieldKind.IntArray, null, CExcelCellJson.Separators(null), out _));
+        }
+
+        /// <summary>**枚举数组不按 `_` 拆**：`_` 是"名字_值"语法的一部分（`green_3`）。</summary>
+        [Test]
+        public void EnumArray_DoesNotSplitOnUnderscore()
+        {
+            var def = new CExcelEnumDef { TypeName = "TestState", Column = "State_ea", IsArray = true };
+            def.Members.Add(new CExcelEnumMember { RawName = "green", Name = "Green", Value = 3 });
+            def.Members.Add(new CExcelEnumMember { RawName = "fire_dragon", Name = "FireDragon", Value = 0 });
+
+            Assert.AreEqual("[3,0]",
+                CExcelCellJson.Literal("green_3;fire_dragon", CExcelFieldKind.EnumArray, def, out string error), error);
+
+            // 顺带：标量枚举的显式值写法也不能被数组分隔符影响
+            Assert.AreEqual("3", CExcelCellJson.Literal("green_3", CExcelFieldKind.Enum, def, out _));
+        }
+
         /// <summary>大整数变成科学计数法时**必须报错**，不能安静地写个错的数。</summary>
         [Test]
         public void BigInteger_ScientificNotation_IsRejectedNotSilentlyTruncated()

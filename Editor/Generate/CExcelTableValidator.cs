@@ -15,9 +15,11 @@ namespace CoffeeBean
     public static class CExcelTableValidator
     {
         /// <summary>校验整张表，把问题追加进 <paramref name="issues"/>。</summary>
-        public static void Validate(CExcelTable table, bool strictTypeCheck, List<CExcelIssue> issues)
+        public static void Validate(CExcelTable table, CExcelGenerateOptions options, List<CExcelIssue> issues)
         {
             if (table == null) return;
+            char[] separators = CExcelCellJson.Separators(options != null ? options.ArraySeparators : null);
+            bool strictTypeCheck = options == null || options.StrictTypeCheck;
 
             foreach (string column in table.Columns)
             {
@@ -33,13 +35,29 @@ namespace CoffeeBean
                     Dictionary<string, object> row = table.Rows[r];
                     object raw = row.TryGetValue(column, out object v) ? v : null;
                     string text = CExcelValue.ToText(raw);
-                    if (text.Trim().Length == 0) continue;   // 空 → 用默认值，不算错
+                    int excelRow = table.HeaderRowIndex + r + 2;
 
-                    string error = CExcelCellJson.Check(text, kind, enumDef);
+                    if (text.Trim().Length == 0)
+                    {
+                        // 空 → 用默认值，不算错……除非这是主键列：有行没主键的表没有意义
+                        // （关掉 SkipRowsWithoutKey 时才会走到这里；开着的话这些行已经被丢掉了）
+                        if (string.Equals(column, table.PrimaryKey, StringComparison.OrdinalIgnoreCase))
+                        {
+                            issues.Add(new CExcelIssue
+                            {
+                                Level = CExcelIssueLevel.Error,
+                                Row = excelRow,
+                                Column = column,
+                                Message = "主键列是空的 —— 有行没有主键的配置表没有意义。"
+                                          + "（说明行/图例行请打开\"跳过主键无效的行\"让它自动跳过）",
+                            });
+                        }
+                        continue;
+                    }
+
+                    string error = CExcelCellJson.Check(text, kind, enumDef, separators);
                     if (error == null) continue;
 
-                    // Excel 行号 = 表头行 + 数据行序号 + 1
-                    int excelRow = table.HeaderRowIndex + r + 2;
                     issues.Add(new CExcelIssue
                     {
                         Level = CExcelIssueLevel.Error,

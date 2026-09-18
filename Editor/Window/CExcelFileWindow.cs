@@ -129,6 +129,8 @@ namespace CoffeeBean
                 ResourcesPath = EditorPrefs.GetString("CoffeeBean.Excel.ResourcesPath", "Configs"),
                 EncryptJson = EditorPrefs.GetBool("CoffeeBean.Excel.EncryptJson", true),
                 StrictTypeCheck = EditorPrefs.GetBool("CoffeeBean.Excel.StrictTypeCheck", true),
+                ArraySeparators = EditorPrefs.GetString("CoffeeBean.Excel.ArraySeparators", CExcelCellJson.DefaultArraySeparators),
+                SkipRowsWithoutKey = EditorPrefs.GetBool("CoffeeBean.Excel.SkipRowsWithoutKey", true),
             };
 
         private void GenerateCurrent()

@@ -50,6 +50,28 @@ namespace CoffeeBean
         /// 老表迁移期可临时关掉（只跳过值校验，枚举定义校验仍然生效）。
         /// </summary>
         public bool StrictTypeCheck = true;
+
+        /// <summary>
+        /// 数组元素分隔符（默认 <see cref="CExcelCellJson.DefaultArraySeparators"/> = `;` `,` `|` `_` 与中文全角）。
+        ///
+        /// **为什么默认带 `_`**：真实项目里最常见的写法就是 `13_100`（id_数量）、`0.2_0.8_1`、`10001_10002_10003`，
+        /// 甚至字符串数组也这么写。不带 `_` 的话这些表全读不出来（会被当成一个非法元素）。
+        ///
+        /// **什么时候该去掉 `_`**：字符串数组（`_sa`）的元素本身含下划线时（如 `fire_dragon;ice_wolf`）——
+        /// 那就把 `_` 从这个集合里删掉，只用 `;` `,` `|` 分隔。
+        /// 枚举数组（`_ea` / `_flagsa`）**永远不按 `_` 拆**（`_` 是枚举"名字_值"语法的组成部分，如 `green_3`）。
+        /// </summary>
+        public string ArraySeparators = CExcelCellJson.DefaultArraySeparators;
+
+        /// <summary>
+        /// 跳过"主键无效"的行（默认 true）。真实配置表里几乎都有说明行 / 图例行 / 草稿块
+        /// （典型长相：表头下面又写一段"字段 | 说明"，或者某个列旁边贴一串临时算的数值），
+        /// 这些行主键是空的 —— 当数据行会让整张表校验失败。
+        ///
+        /// 跳过时会出**警告**并列出被跳过的行号，不是悄悄吞掉。
+        /// 若跳完一行都不剩，则报错（多半是自动选错了主键列），不生成空表。
+        /// </summary>
+        public bool SkipRowsWithoutKey = true;
     }
 
     /// <summary>生成结果。</summary>
@@ -187,7 +209,7 @@ namespace CoffeeBean
 
             CExcelTable table = BuildTable(context, read, sheetName, typeNamePrefix,
                 isChapter ? context.GetGroupEnums(frontName) : null, issues);
-            CExcelTableValidator.Validate(table, effective.StrictTypeCheck, issues);
+            CExcelTableValidator.Validate(table, effective, issues);
             return issues;
         }
 
@@ -338,7 +360,7 @@ namespace CoffeeBean
 
             var issues = new List<CExcelIssue>();
             CExcelTable table = BuildTable(context, read, sheetName, typeNamePrefix, presetEnums, issues);
-            CExcelTableValidator.Validate(table, options.StrictTypeCheck, issues);
+            CExcelTableValidator.Validate(table, options, issues);
             aggregate.Issues.AddRange(issues);
             if (issues.Exists(i => i.Level == CExcelIssueLevel.Error))
             {
@@ -375,7 +397,7 @@ namespace CoffeeBean
                     // EncryptJson 时写 XOR 密文字节（TextAsset.bytes 保留原始字节，运行时解密）
                     EnsureFolder(options.JsonResourcesFolder);
                     string jsonPath = Path.Combine(options.JsonResourcesFolder, className + ".json");
-                    string jsonText = WriteJson(table);
+                    string jsonText = WriteJson(table, CExcelCellJson.Separators(options.ArraySeparators));
                     if (options.EncryptJson)
                         File.WriteAllBytes(jsonPath, CExcelCrypto.Encode(jsonText));
                     else
@@ -572,23 +594,101 @@ namespace CoffeeBean
 
             table.PrimaryKey = context.Options.PrimaryKey;
             if (string.IsNullOrEmpty(table.PrimaryKey) || !table.Kinds.ContainsKey(table.PrimaryKey)
-                || CExcelTypeInfer.IsArray(table.Kinds[table.PrimaryKey]))
+                || !CExcelTypeInfer.IsKeyCandidate(table.Kinds[table.PrimaryKey]))
                 table.PrimaryKey = PickPrimaryKey(table);
+
+            if (context.Options.SkipRowsWithoutKey && table.PrimaryKey != null)
+                DropRowsWithoutKey(table, context.Options, issues);
             return table;
         }
 
+        /// <summary>
+        /// 自动选主键：**优先选"每行都填了合法值"的第一列**（真正的键列通常如此），
+        /// 没有这样的列再退回"第一个可做键的列"。
+        /// </summary>
         private static string PickPrimaryKey(CExcelTable table)
         {
+            string first = null;
             foreach (string column in table.Columns)
             {
-                if (CExcelTypeInfer.IsKeyCandidate(table.Kinds[column])) return column;
+                if (!CExcelTypeInfer.IsKeyCandidate(table.Kinds[column])) continue;
+                if (first == null) first = column;
+                if (ColumnIsUsableKeyEverywhere(table, column)) return column;
             }
-            return null;
+            return first;
+        }
+
+        private static bool ColumnIsUsableKeyEverywhere(CExcelTable table, string column)
+        {
+            CExcelFieldKind kind = table.Kinds[column];
+            table.Enums.TryGetValue(column, out CExcelEnumDef enumDef);
+            bool sawValue = false;
+            foreach (Dictionary<string, object> row in table.Rows)
+            {
+                string text = CExcelValue.ToText(row.TryGetValue(column, out object v) ? v : null).Trim();
+                if (text.Length == 0) return false;
+                if (CExcelCellJson.Check(text, kind, enumDef) != null) return false;
+                sawValue = true;
+            }
+            return sawValue;
+        }
+
+        /// <summary>
+        /// 丢掉"主键无效"的行（说明行 / 图例行 / 边上的草稿块）。
+        ///
+        /// 真实配置表里几乎都有这类行（表头下面又写一段"字段 | 说明"，或者某列旁边贴一串临时算的数），
+        /// 它们的主键是空的 —— 当数据行会让整张表校验失败。跳过时出**警告并列出行号**，不是悄悄吞。
+        /// 跳完一行都不剩 → 报错（多半是自动选错了主键列），不生成空表。
+        /// </summary>
+        private static void DropRowsWithoutKey(CExcelTable table, CExcelGenerateOptions options, List<CExcelIssue> issues)
+        {
+            string key = table.PrimaryKey;
+            CExcelFieldKind kind = table.Kinds[key];
+            table.Enums.TryGetValue(key, out CExcelEnumDef enumDef);
+            char[] separators = CExcelCellJson.Separators(options != null ? options.ArraySeparators : null);
+
+            var kept = new List<Dictionary<string, object>>(table.Rows.Count);
+            var skipped = new List<int>();
+            for (int r = 0; r < table.Rows.Count; r++)
+            {
+                Dictionary<string, object> row = table.Rows[r];
+                string text = CExcelValue.ToText(row.TryGetValue(key, out object v) ? v : null).Trim();
+                bool usable = text.Length > 0 && CExcelCellJson.Check(text, kind, enumDef, separators) == null;
+                if (usable) kept.Add(row);
+                else skipped.Add(table.HeaderRowIndex + r + 2);
+            }
+
+            if (skipped.Count == 0) return;
+
+            if (kept.Count == 0)
+            {
+                issues.Add(Error(0, key,
+                    $"主键列 {key} 在**所有行**上都是空的或非法值 —— 无法确定数据行。请检查表头检测是否选错行，或用选项显式指定主键列。"));
+                return;
+            }
+
+            table.Rows = kept;
+            issues.Add(new CExcelIssue
+            {
+                Level = CExcelIssueLevel.Warning,
+                Row = skipped[0],
+                Column = key,
+                Message = $"跳过 {skipped.Count} 行（主键 {key} 为空或不是合法值，通常是说明/图例/草稿行）：第 " + DescribeRows(skipped) + " 行。",
+            });
+        }
+
+        private static string DescribeRows(List<int> rows)
+        {
+            const int limit = 12;
+            var parts = new List<string>();
+            for (int i = 0; i < rows.Count && i < limit; i++) parts.Add(rows[i].ToString(CultureInfo.InvariantCulture));
+            string text = string.Join(", ", parts);
+            return rows.Count > limit ? text + " …(共 " + rows.Count + " 行)" : text;
         }
 
         // ========== JSON 生成 ==========
 
-        private static string WriteJson(CExcelTable table)
+        private static string WriteJson(CExcelTable table, char[] arraySeparators)
         {
             var sb = new StringBuilder();
             sb.Append("{\"data\":[");
@@ -605,7 +705,7 @@ namespace CoffeeBean
                     sb.Append(CExcelCellJson.Quote(CExcelTypeInfer.ToFieldName(column))).Append(':');
                     object value = row.TryGetValue(column, out object v) ? v : null;
                     table.Enums.TryGetValue(column, out CExcelEnumDef enumDef);
-                    sb.Append(CExcelCellJson.Literal(CExcelValue.ToText(value), table.Kinds[column], enumDef, out _));
+                    sb.Append(CExcelCellJson.Literal(CExcelValue.ToText(value), table.Kinds[column], enumDef, arraySeparators, out _));
                 }
                 sb.Append('}');
             }

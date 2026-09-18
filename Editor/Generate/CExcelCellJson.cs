@@ -20,9 +20,34 @@ namespace CoffeeBean
     public static class CExcelCellJson
     {
         /// <summary>
-        /// 单元格文本 → JSON 字面量。<paramref name="error"/> 非空 = 值非法（此时返回 <c>0</c>，调用方应把它当错误处理）。
+        /// 默认数组元素分隔符：`;` `,` `|` `_` 与中文全角版本。
+        ///
+        /// `_` 必须在里面：真实项目里数组基本都写成 `13_100`（id_数量）、`0.2_0.8_1`、`10001_10002_10003`，
+        /// 字符串数组也这么写。枚举数组不走这个集合（见 <see cref="SplitArray"/>），
+        /// 因为 `_` 是枚举"名字_值"语法的一部分（`green_3`）。
         /// </summary>
+        public const string DefaultArraySeparators = ";,|_；，｜";
+
+        private static readonly char[] DefaultSeparators = DefaultArraySeparators.ToCharArray();
+
+        /// <summary>分隔符串 → 字符数组（空/ null → 默认集合；会去掉空白字符）。</summary>
+        public static char[] Separators(string separators)
+        {
+            if (string.IsNullOrEmpty(separators)) return DefaultSeparators;
+            var list = new List<char>();
+            foreach (char c in separators)
+                if (!char.IsWhiteSpace(c)) list.Add(c);
+            return list.Count > 0 ? list.ToArray() : DefaultSeparators;
+        }
+
+        /// <summary>单元格文本 → JSON 字面量（默认分隔符）。</summary>
         public static string Literal(string raw, CExcelFieldKind kind, CExcelEnumDef enumDef, out string error)
+            => Literal(raw, kind, enumDef, null, out error);
+
+        /// <summary>
+        /// 单元格文本 → JSON 字面量。<paramref name="error"/> 非空 = 值非法（此时返回默认值，调用方应把它当错误处理）。
+        /// </summary>
+        public static string Literal(string raw, CExcelFieldKind kind, CExcelEnumDef enumDef, char[] arraySeparators, out string error)
         {
             error = null;
             string text = (raw ?? string.Empty).Trim();
@@ -32,12 +57,12 @@ namespace CoffeeBean
             if (CExcelTypeInfer.IsArray(kind))
             {
                 CExcelFieldKind element = CExcelTypeInfer.ElementKind(kind);
-                List<string> parts = SplitArray(text, element);
+                List<string> parts = SplitArray(text, element, arraySeparators);
                 var sb = new StringBuilder();
                 sb.Append('[');
                 for (int i = 0; i < parts.Count; i++)
                 {
-                    string elementLiteral = Literal(parts[i], element, enumDef, out string elementError);
+                    string elementLiteral = Literal(parts[i], element, enumDef, arraySeparators, out string elementError);
                     if (elementError != null)
                     {
                         error = $"数组第 {i + 1} 项：{elementError}";
@@ -67,20 +92,22 @@ namespace CoffeeBean
         }
 
         /// <summary>只校验（不产出 JSON）：返回 null = 合法。</summary>
-        public static string Check(string raw, CExcelFieldKind kind, CExcelEnumDef enumDef)
+        public static string Check(string raw, CExcelFieldKind kind, CExcelEnumDef enumDef, char[] arraySeparators = null)
         {
-            Literal(raw, kind, enumDef, out string error);
+            Literal(raw, kind, enumDef, arraySeparators, out string error);
             return error;
         }
 
         /// <summary>
         /// 数组拆分。**按元素类型选分隔符**（这是踩过的坑：向量/颜色/矩形/字典的元素内部也用逗号或分号，
-        /// 所以它们不能拿 `,`/`;` 当数组分隔符）：
+        /// 枚举成员名里还会用下划线）：
         /// · 字典（_kva）→ `|`（元素内部的键值对用 `,` `;`）
-        /// · 向量 / 四元数 / 颜色 / 矩形 → `;`（**不认 `,`** —— `1,2` 是一个二维向量）
-        /// · 其余（含枚举数组、[Flags] 数组）→ `;` 或 `,`；[Flags] 数组的每个元素内部再用 `|` 组合
+        /// · 向量 / 四元数 / 颜色 / 矩形 → `;` `|`（**不认 `,`** —— `1,2` 是一个二维向量）
+        /// · 枚举 → `;` `,` `|`（**不认 `_`** —— `_` 是"名字_值"语法，`green_3` 不能被拆开）
+        /// · [Flags] → `;` `,`（`|` 留给元素内部的位组合，如 `Cold|Hot`）
+        /// · 其余（数值 / 字符串 / 布尔 / 时间…）→ 用可配置的 <paramref name="arraySeparators"/>（默认含 `_`）
         /// </summary>
-        public static List<string> SplitArray(string text, CExcelFieldKind elementKind)
+        public static List<string> SplitArray(string text, CExcelFieldKind elementKind, char[] arraySeparators)
         {
             switch (elementKind)
             {
@@ -93,10 +120,20 @@ namespace CoffeeBean
                 case CExcelFieldKind.Color:
                 case CExcelFieldKind.Rect:
                     return CExcelTypeInfer.SplitOnAny(text, new[] { ';', '；', '|', '｜' });
+                case CExcelFieldKind.Enum:
+                    return CExcelTypeInfer.SplitOnAny(text, new[] { ';', '；', ',', '，', '|', '｜' });
+                case CExcelFieldKind.Flags:
+                    // [Flags] 数组：`|` 是**元素内部**的位组合分隔符（Cold|Hot），绝不能当元素分隔符，
+                    // 否则 "Cold|Hot;Cold" 会变成 3 个元素。元素之间只认 ; 和 ,
+                    return CExcelTypeInfer.SplitOnAny(text, new[] { ';', '；', ',', '，' });
                 default:
-                    return CExcelTypeInfer.SplitArrayValue(text);
+                    return CExcelTypeInfer.SplitOnAny(text, arraySeparators ?? DefaultSeparators);
             }
         }
+
+        /// <summary>数组拆分（默认分隔符）。</summary>
+        public static List<string> SplitArray(string text, CExcelFieldKind elementKind)
+            => SplitArray(text, elementKind, null);
 
         /// <summary>空单元格的默认 JSON 字面量。</summary>
         public static string DefaultLiteral(CExcelFieldKind kind)
