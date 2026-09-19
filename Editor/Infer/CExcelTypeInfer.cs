@@ -311,6 +311,26 @@ namespace CoffeeBean
         private static int SuffixLength(CExcelFieldKind kind)
             => CExcelTypeCatalog.SuffixLength(kind);
 
+        /// <summary>
+        /// 规范列名 → **Legacy 字段名**（去类型后缀 / 去 <c>:类型名</c>，其余**原样保留**，不做驼峰转换、不改大小写）。
+        ///
+        /// 为什么需要它：项目既有生成器（AyFarme 的 JsonGenerator）就是原样取名 ——
+        /// <c>mode_i</c> → <c>mode</c>、<c>Des_s</c> → <c>Des</c>、<c>isLord_i</c> → <c>isLord</c>；
+        /// 而本模块的 <see cref="ToFieldName"/> 生成 PascalCase（<c>Mode</c>/<c>IsLord</c>）。
+        /// 业务代码里写的是 <c>data.mode</c> / <c>data.quality</c> 这种小写开头的字段名，
+        /// 只有原样命名才能让生成产物**直接替换**既有代码（实测差了 8 个字段就编译不过）。
+        /// </summary>
+        public static string ToLegacyFieldName(string columnName)
+        {
+            if (string.IsNullOrEmpty(columnName)) return columnName;
+            string head = SuffixHead(columnName);
+            CExcelFieldKind? kind = CExcelTypeCatalog.BySuffix(head);
+            string name = kind.HasValue
+                ? head.Substring(0, head.Length - SuffixLength(kind.Value))
+                : head;
+            return name.Length == 0 ? columnName : name;
+        }
+
         /// <summary>解析数组值（分隔符 ; 或 ,，支持中文 ；）。返回元素文本列表。</summary>
         public static List<string> SplitArrayValue(string text)
             => SplitOn(text, new[] { ';', '；', ',', '，' });

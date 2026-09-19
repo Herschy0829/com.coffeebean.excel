@@ -19,6 +19,7 @@ namespace CoffeeBean
         private const string PrefCodeFolder = "CoffeeBean.Excel.CodeFolder";
         private const string PrefPackageName = "CoffeeBean.Excel.PackageName";
         private const string PrefNamespace = "CoffeeBean.Excel.Namespace";
+        private const string PrefApiStyle = "CoffeeBean.Excel.ApiStyle";
         private const string PrefCompressData = "CoffeeBean.Excel.CompressData";
         private const string PrefEncryptData = "CoffeeBean.Excel.EncryptData";
         private const string PrefStrictTypeCheck = "CoffeeBean.Excel.StrictTypeCheck";
@@ -29,6 +30,7 @@ namespace CoffeeBean
         private string _codeFolder = "Packages/com.coffeebean.config.generated";
         private string _packageName = "com.coffeebean.config.generated";
         private string _namespace = "CoffeeBean";
+        private CExcelApiStyle _apiStyle = CExcelApiStyle.Legacy;
         private string _primaryKey = string.Empty;
         private bool _generateData = true;
         private bool _generateClass = true;
@@ -59,6 +61,7 @@ namespace CoffeeBean
             _codeFolder = EditorPrefs.GetString(PrefCodeFolder, "Packages/com.coffeebean.config.generated");
             _packageName = EditorPrefs.GetString(PrefPackageName, "com.coffeebean.config.generated");
             _namespace = EditorPrefs.GetString(PrefNamespace, "CoffeeBean");
+            _apiStyle = (CExcelApiStyle)EditorPrefs.GetInt(PrefApiStyle, (int)CExcelApiStyle.Legacy);
             _compressData = EditorPrefs.GetBool(PrefCompressData, true);
             _encryptData = EditorPrefs.GetBool(PrefEncryptData, true);
             _strictTypeCheck = EditorPrefs.GetBool(PrefStrictTypeCheck, true);
@@ -107,6 +110,16 @@ namespace CoffeeBean
             _codeFolder = EditorGUILayout.TextField("代码包目录（内嵌包）", _codeFolder);
             _packageName = EditorGUILayout.TextField("包名（= StreamingAssets 子目录）", _packageName);
             _namespace = EditorGUILayout.TextField("命名空间", _namespace);
+            _apiStyle = (CExcelApiStyle)EditorGUILayout.EnumPopup("接口风格", _apiStyle);
+            if (_apiStyle == CExcelApiStyle.Legacy)
+                EditorGUILayout.LabelField(
+                    "Legacy（对齐项目既有 *_DataGetter）：GetData / GetDataByID / GetDataNullID / GetDataByIndex / " +
+                    "GetDataNullIndexNull / GetArray / GetArrayLenth / Get<字段>ProptyList，类放全局命名空间，业务代码无需改动。",
+                    EditorStyles.wordWrappedMiniLabel);
+            else
+                EditorGUILayout.LabelField(
+                    "Modern（本模块原有风格）：<表>Getter + Get / GetAll / GetByIndex / All / Find / FindAll，类放上面的命名空间。",
+                    EditorStyles.wordWrappedMiniLabel);
             _primaryKey = EditorGUILayout.TextField("主键列（空 = 自动）", _primaryKey);
             EditorGUILayout.BeginHorizontal();
             _generateData = EditorGUILayout.Toggle("生成数据", _generateData);
@@ -159,6 +172,7 @@ namespace CoffeeBean
                 EditorPrefs.SetString(PrefCodeFolder, _codeFolder);
                 EditorPrefs.SetString(PrefPackageName, _packageName);
                 EditorPrefs.SetString(PrefNamespace, _namespace);
+                EditorPrefs.SetInt(PrefApiStyle, (int)_apiStyle);
                 EditorPrefs.SetBool(PrefCompressData, _compressData);
                 EditorPrefs.SetBool(PrefEncryptData, _encryptData);
                 EditorPrefs.SetBool(PrefStrictTypeCheck, _strictTypeCheck);
@@ -258,6 +272,7 @@ namespace CoffeeBean
                 CodeFolder = _codeFolder,
                 PackageName = _packageName,
                 Namespace = _namespace,
+                ApiStyle = _apiStyle,
                 PrimaryKey = string.IsNullOrWhiteSpace(_primaryKey) ? null : _primaryKey,
                 GenerateData = _generateData,
                 GenerateClass = _generateClass,

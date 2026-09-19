@@ -101,7 +101,7 @@ namespace CoffeeBean.Excel.Tests
 
             string getter = File.ReadAllText(CExcelTestFactory.CodePath(options, "NoKeyChapter", "NoKeyChapterGetter.cs"));
             StringAssert.Contains("Chapters", getter);
-            StringAssert.Contains("GetChapter(int chapterId)", getter);
+            StringAssert.Contains("GetChapter(int chapterId = -1)", getter);
             StringAssert.Contains("Chapter1", getter);
             StringAssert.Contains("HasChapter(int chapterId)", getter);
             StringAssert.Contains("本表没有可做键的列", getter);

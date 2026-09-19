@@ -108,7 +108,61 @@ List<CExcelIssue> issues = CExcelGenerator.Validate(path, sheetName, options);
 - `Runtime/ConfigTableRuntime.cs` —— 运行时支撑（容器解码 + 预加载 + 数据路径解析）
 - `package.json` + `coffeebean.configgen.json` —— 内嵌包清单与构建钩子标记（后者别删）
 
-### 4. 多 Sheet 与分章节（对齐项目约定）
+### 4. 接口风格：Legacy（**默认**）与 Modern
+
+`CExcelGenerateOptions.ApiStyle` 决定生成的类名 / 文件名 / 成员名：
+
+| | **Legacy（默认，对齐项目既有）** | Modern（本模块早期风格） |
+|---|---|---|
+| 文件 | `<表>_DataGetter.cs`、`<表>_Data.cs`、章节 `<前缀>_<N>_Data.cs` | `<表>.cs`、`<表>Getter.cs`、章节 `<前缀>Base/Chapter<N>` |
+| 类 | `<表>_DataGetter` / `<表>_PropertyBase` / `<表>_DataBase` | `<表>Getter` / `<表>` |
+| 取整表 | `GetData()` → `_DataBase`（`.DataArray` / `.ArrayLength`） | `All` |
+| 按主键 | `GetDataByID(id)`（找不到：`LogError` + `id<=0` 给首行 / 否则给末行）、`GetDataNullID(id)`（找不到 null） | `Get(key)`（找不到 null）/ `GetAll(key)` |
+| 按下标 | `GetDataByIndex(i)` / `GetDataNullIndexNull(i)` | `GetByIndex(i)` |
+| 行数 | `GetArrayLenth()`（**沿用项目的拼写**） | `Count` |
+| 数组 | `GetArray()` | `All` |
+| 每字段列表 | `Get<字段>ProptyList()` | — |
+| 重复 ID | `GetDataBySameID(id, lev)` / `GetDataBySameIDMaxlev(id)` | `GetAll(key)` |
+| 命名空间 | **全局命名空间**（业务代码不用加 using） | `options.Namespace` |
+| 字段名 | **原样列名**（`mode_i` → `mode`、`Des_s` → `Des`） | PascalCase（`Mode`/`Des`） |
+
+**为什么默认 Legacy**：真实工程里已有 55 个 `*_DataGetter.cs`、139 处调用点，只有名字逐字一致（连
+`GetArrayLenth` 这个笔误、字段名大小写都一致）生成产物才能**直接替换**老代码、业务代码一行不改。
+Modern 保留给新项目/新表。
+
+**章节表的"当前章节"是注入的（方案 B）**：生成包是独立程序集，引用不到游戏业务代码（Assembly-CSharp），
+所以生成代码绝不出现 `PlayerDataMgr` 这类游戏类型；由游戏在启动早期实现接口并注入一次：
+
+```csharp
+public class GameConfigContext : IConfigContext
+{
+    public int CurrentChapterId => PlayerDataMgr._Ins?.data?.moduleRequest?.curChapterID ?? 1;
+}
+ConfigTableRuntime.Context = new GameConfigContext();   // 启动早期
+```
+
+之后章节表所有接口的 `chapterID` 都可以省略（`-1` = 当前章节）：
+
+```csharp
+ChapterConfig_DataGetter.GetDataByID(100);              // 当前章节
+ChapterConfig_DataGetter.GetDataByID(100, 2);           // 指定第 2 章
+ChapterConfig_DataGetter.GetData();                     // 当前章节整表
+```
+
+没注入时回退到 `ConfigTableRuntime.FallbackChapterId`（默认 1，与项目里 `?? 1` 的既有行为一致）并**只警告一次**；
+章节号没配置时 `LogWarning("策划没有配置 第N章节 ... 默认给上一章节数据")` 并返回最后一章数据（照抄项目行为）。
+
+### 4.1 生成时的两个行为（踩过坑，别当 bug）
+
+- **主键自动选择优先 ID 命名**：打分 = 名字为 `ID`（+100）/ 以 `ID` 开头（+60）/ 非字符串（+2）/
+  每行都有合法值（+30）。为什么：老规则"第一个每行都有值的列"会把备注列 `Bz_s` 选成主键
+  （实测 `BuildingConfig`、`ChapterConfig` 都中过），主键一换 `GetDataBySameID` 会**静默给错数据**。
+  主键列上空的/非法的行会被**跳过并警告列出行号**（说明行、图例、草稿行）。
+- **竖排键值对表会被跳过**：表头行只有 1 个带类型后缀列名的表（如项目的 `常量表.xlsx`，一行一个常量）
+  不是常规配置表，生成时给 Warning 并跳过（它由项目自己的 `AppConstGenerator` 维护），
+  不再报一堆"int 列填的值不合法"的假错误。
+
+### 5. 多 Sheet 与分章节（对齐项目约定）
 
 - **多 Sheet**：`GenerateAllSheets` 处理全部 sheet，**跳过名字含 `sheet`/`debug` 的**（如默认 `Sheet1`）
 - **分章节**：sheet 名形如 `前缀_数字`（`ChapterConfig_1`、`ChapterConfig_2`）→ 同前缀聚合：

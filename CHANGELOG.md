@@ -21,7 +21,24 @@
 <包>/package.json, coffeebean.configgen.json, {Namespace}.Generated.asmdef
 ```
 
+### Fixed
+- **主键自动选择不再被备注列顶掉**：打分改为「名字是 `ID` +100 / 以 `ID` 开头 +60 / 非字符串 +2 /
+  每行都有合法值 +30」。老规则"第一个每行都有值的列"在真实表上会把 `Bz_s`（备注）选成主键
+  （实测 `BuildingConfig` 选了 `Bz_s`、`ChapterConfig` 选了 `ChapterIndex_s`），而项目既有代码用的是 `ID` ——
+  主键不一致会让 `GetDataBySameID` 这类接口**静默给错数据**。
+- **字符串主键的 Legacy 代码编译不过**：`_id<=0` 只对数值键成立，字符串键改为 `string.IsNullOrEmpty(_id)`。
+- **竖排键值对表不再产生一堆假错误**：表头行只有 1 个带类型后缀列名的表（如 `常量表.xlsx`）给 Warning 并跳过。
+
 ### Added
+- **Legacy 接口风格（`ApiStyle`，默认）**：生成的**文件名 / 类名 / 成员名与原工程既有 `*_DataGetter` 逐字一致**
+  （`<表>_DataGetter.cs` / `<表>_Data.cs`、`<表>_DataGetter` / `_PropertyBase` / `_DataBase`、
+  `GetData / GetDataByID / GetDataNullID / GetDataBySameID / GetDataBySameIDMaxlev / GetDataByIndex /
+  GetDataNullIndexNull / GetArray / GetArrayLenth / Get<字段>ProptyList`，类放全局命名空间，
+  字段名取**原样列名**）。目的：真实工程 55 个 getter / 139 处调用点可以**直接替换、业务代码零改动**。
+  原来的名字保留为 `ApiStyle.Modern`。
+- **章节号注入（方案 B）**：生成包是独立程序集、引用不到游戏业务代码，所以新增 `IConfigContext` 接口 +
+  `ConfigTableRuntime.Context` / `FallbackChapterId` / `CurrentChapterId`；章节表成员一律带
+  `int chapterID = -1`（-1 = 当前章节），没配置的章节 `LogWarning` 后回退最后一章（对齐既有行为）。
 - **`.cbcfg` 数据容器**：`magic "CBG1" | version | flags | reserved | rawLength | rawChecksum | payload`，
   `payload = Deflate(JSON) → XOR`。**顺序恒为先压缩再加密**（反过来密文近似随机、压不动）；
   FNV-1a 校验和能识别截断与损坏，解不开时明确报错而不是解出半个表。

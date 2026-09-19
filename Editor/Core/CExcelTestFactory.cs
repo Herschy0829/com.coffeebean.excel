@@ -70,14 +70,27 @@ namespace CoffeeBean
 
         // ========== 产物定位与解码（0.6.0 新布局：一表一文件夹 Code/ + Data/） ==========
 
-        /// <summary>测试用：构造"生成到临时包目录"的选项（数据默认压缩 + 加密，走真实链路）。</summary>
+        /// <summary>
+        /// 测试用：构造"生成到临时包目录"的选项（数据默认压缩 + 加密，走真实链路）。
+        /// 固定 <see cref="CExcelApiStyle.Modern"/>：本模块自己的用例锁的是 Modern 那套名字，
+        /// 默认值（Legacy = 与项目既有 *_DataGetter 一致）由 <see cref="LegacyPackageOptions"/> 单独覆盖。
+        /// </summary>
         public static CExcelGenerateOptions TempPackageOptions(string tmpRoot, string ns = "CoffeeBean")
             => new CExcelGenerateOptions
             {
                 CodeFolder = Path.Combine(tmpRoot, "Package"),
                 PackageName = "com.coffeebean.test.generated",
                 Namespace = ns,
+                ApiStyle = CExcelApiStyle.Modern,
             };
+
+        /// <summary>测试用：Legacy 风格（与项目既有 &lt;T&gt;_DataGetter / &lt;T&gt;_PropertyBase / &lt;T&gt;_DataBase 同名同形）。</summary>
+        public static CExcelGenerateOptions LegacyPackageOptions(string tmpRoot, string ns = "CoffeeBean")
+        {
+            CExcelGenerateOptions options = TempPackageOptions(tmpRoot, ns);
+            options.ApiStyle = CExcelApiStyle.Legacy;
+            return options;
+        }
 
         /// <summary>测试用：代码文件路径 &lt;代码包&gt;/&lt;表&gt;/Code/&lt;文件名&gt;。</summary>
         public static string CodePath(CExcelGenerateOptions options, string tableFolder, string fileName)

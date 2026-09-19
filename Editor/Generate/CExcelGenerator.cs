@@ -7,9 +7,34 @@ using System.Text;
 
 namespace CoffeeBean
 {
+    /// <summary>生成代码的 API 风格。</summary>
+    public enum CExcelApiStyle
+    {
+        /// <summary>
+        /// 项目既有风格（默认）：<c>&lt;T&gt;_DataGetter</c> / <c>&lt;T&gt;_PropertyBase</c> / <c>&lt;T&gt;_DataBase</c>，
+        /// 成员为 <c>GetData / GetDataByID / GetDataNullID / GetDataByIndex / GetDataNullIndexNull / GetArray / GetArrayLenth / GetXxxProptyList</c>，
+        /// 类放在**全局命名空间**（业务代码不用加 using）。
+        ///
+        /// **为什么它是默认**：真实工程里已有上百处调用与 55 个 <c>*_DataGetter.cs</c>，
+        /// 只有完全对齐这套名字，生成产物才能**直接替换**老代码、业务代码一行不改。
+        /// </summary>
+        Legacy = 0,
+
+        /// <summary>
+        /// 本模块早期风格：<c>&lt;T&gt;Getter</c> / <c>&lt;T&gt;</c>，成员为 <c>Get / GetAll / GetByIndex / All / Find / FindAll</c>，
+        /// 放在 <see cref="CExcelGenerateOptions.Namespace"/> 下。键重复时 <c>Get</c> 给首行、<c>GetAll</c> 给全部。
+        /// </summary>
+        Modern = 1,
+    }
+
     /// <summary>生成选项。</summary>
     public sealed class CExcelGenerateOptions
     {
+        /// <summary>
+        /// 生成代码的 API 风格（默认 <see cref="CExcelApiStyle.Legacy"/> = 与项目既有 <c>*_DataGetter</c> 一致）。
+        /// </summary>
+        public CExcelApiStyle ApiStyle = CExcelApiStyle.Legacy;
+
         /// <summary>
         /// 代码输出根 = 内嵌包根（相对工程根或绝对路径）。默认 <c>Packages/com.coffeebean.config.generated</c>。
         ///
@@ -345,8 +370,12 @@ namespace CoffeeBean
                     string chapterCodeDir = Path.Combine(options.CodeFolder, group.Key, "Code");
                     EnsureFolder(chapterCodeDir);
                     EnsurePackageSkeleton(options);
-                    string getterPath = Path.Combine(chapterCodeDir, group.Key + "Getter.cs");
-                    File.WriteAllText(getterPath, WriteChapterGetter(table, group.Key, group.Value, options.Namespace), new UTF8Encoding(false));
+                    bool legacy = options.ApiStyle == CExcelApiStyle.Legacy;
+                    string getterPath = Path.Combine(chapterCodeDir, group.Key + (legacy ? "_DataGetter.cs" : "Getter.cs"));
+                    string getterText = legacy
+                        ? WriteLegacyChapterFamily(table, group.Key, group.Value, options.Namespace)
+                        : WriteChapterGetter(table, group.Key, group.Value, options.Namespace);
+                    File.WriteAllText(getterPath, getterText, new UTF8Encoding(false));
                     result.GeneratedFiles.Add(getterPath);
                 }
                 catch (Exception e)
@@ -397,6 +426,24 @@ namespace CoffeeBean
             string className = isChapter || string.IsNullOrEmpty(options.ClassName) ? sheetName : options.ClassName;
             string typeNamePrefix = isChapter ? frontName : className;
             Dictionary<string, CExcelEnumDef> presetEnums = isChapter ? context.GetGroupEnums(frontName) : null;
+
+            // 竖排"键值对"表（常量表那类）：表头行只有 1 个带类型后缀的列名，同行其余单元格是值和说明
+            // （如 `TestInt_i | 300 | 测试整型`）。这不是常规配置表，硬按常规表生成只会得到一堆
+            // "int 列填的值不合法"的**假错误**；这类表在本项目里由专用生成器（AppConstGenerator）维护。
+            int typedColumns = 0;
+            foreach (string column in read.Columns) if (CExcelTypeInfer.IsSuffixed(column)) typedColumns++;
+            if (typedColumns < 2)
+            {
+                aggregate.Issues.Add(new CExcelIssue
+                {
+                    Level = CExcelIssueLevel.Warning,
+                    Row = read.HeaderRowIndex + 1,
+                    Column = "-",
+                    Message = "表 " + sheetName + " 只检测到 " + typedColumns + " 个带类型后缀的列名 → 判定为竖排（键值对）表，"
+                              + "不做常规表生成（请用专用生成器维护这类表）",
+                });
+                return result;
+            }
 
             var issues = new List<CExcelIssue>();
             CExcelTable table = BuildTable(context, read, sheetName, typeNamePrefix, presetEnums, issues);
@@ -452,14 +499,42 @@ namespace CoffeeBean
                     // 数据与代码同处内嵌包（Assets 之外）；扩展名刻意不用 .json —— 见 CExcelDataContainer 的说明
                     EnsureFolder(dataDir);
                     string dataPath = Path.Combine(dataDir, dataName + CExcelDataContainer.Extension);
-                    string jsonText = WriteJson(table, CExcelCellJson.Separators(options.ArraySeparators));
+                    string jsonText = WriteJson(table, CExcelCellJson.Separators(options.ArraySeparators),
+                        options.ApiStyle == CExcelApiStyle.Legacy);
                     File.WriteAllBytes(dataPath, CExcelDataContainer.Encode(jsonText, options.CompressData, options.EncryptData));
                     result.GeneratedFiles.Add(dataPath);
                 }
 
                 if (options.GenerateClass)
                 {
-                    if (isChapter)
+                    if (options.ApiStyle == CExcelApiStyle.Legacy)
+                    {
+                        // Legacy 风格：普通表一个文件（<T>_DataGetter.cs 内含 Getter + PropertyBase + DataBase）；
+                        // 章节表的聚合文件在章节循环里写，这里只补每章节的 <前缀>_<N>_Data 空壳子类。
+                        if (isChapter)
+                        {
+                            string chapterDataName = frontName + "_" + chapterIndex + "_Data";
+                            string chapterDataPath = Path.Combine(codeDir, chapterDataName + ".cs");
+                            File.WriteAllText(chapterDataPath,
+                                WriteLegacyDataSubClass(chapterDataName, frontName + "_DataBase", sheetName, options.Namespace),
+                                new UTF8Encoding(false));
+                            result.GeneratedFiles.Add(chapterDataPath);
+                        }
+                        else
+                        {
+                            string legacyPath = Path.Combine(codeDir, className + "_DataGetter.cs");
+                            File.WriteAllText(legacyPath, WriteLegacyGetter(table, className, options.Namespace, dataRelative), new UTF8Encoding(false));
+                            result.GeneratedFiles.Add(legacyPath);
+
+                            // <表>_Data.cs：数据子类空壳（与项目一致，Getter 里的静态缓存就是它）
+                            string dataClassPath = Path.Combine(codeDir, className + "_Data.cs");
+                            File.WriteAllText(dataClassPath,
+                                WriteLegacyDataSubClass(className + "_Data", className + "_DataBase", sheetName, options.Namespace),
+                                new UTF8Encoding(false));
+                            result.GeneratedFiles.Add(dataClassPath);
+                        }
+                    }
+                    else if (isChapter)
                     {
                         // 基类（同前缀共用一个，覆盖写 —— 各章节内容一致因为枚举用的是并集）+ 章节子类 + 章节 Getter
                         // 命名：<前缀>Base / <前缀>Chapter<N> / <前缀>Chapter<N>Getter
@@ -655,19 +730,58 @@ namespace CoffeeBean
         }
 
         /// <summary>
-        /// 自动选主键：**优先选"每行都填了合法值"的第一列**（真正的键列通常如此），
-        /// 没有这样的列再退回"第一个可做键的列"。
+        /// 自动选主键：按 <see cref="ScoreKeyColumn"/> 给每个"可做键"的列打分，取最高分。
+        ///
+        /// **为什么不是"第一个每行都有值的列"**（旧规则）：真实表尾部常有图例/草稿行，
+        /// ID 列空着而"备注(Bz)"列写着字 —— 旧规则会把备注列选成主键。实测把
+        /// <c>BuildingConfig</c> 的主键选成了 <c>Bz_s</c>、<c>ChapterConfig</c> 选成了 <c>ChapterIndex_s</c>，
+        /// 而项目既有代码用的都是 <c>ID</c>：主键不一致 = <c>GetDataBySameID</c> 这类接口**静默给错数据**。
         /// </summary>
         private static string PickPrimaryKey(CExcelTable table)
         {
-            string first = null;
+            string best = null;
+            int bestScore = int.MinValue;
             foreach (string column in table.Columns)
             {
                 if (!CExcelTypeInfer.IsKeyCandidate(table.Kinds[column])) continue;
-                if (first == null) first = column;
-                if (ColumnIsUsableKeyEverywhere(table, column)) return column;
+                int score = ScoreKeyColumn(column, table.Kinds[column], ColumnIsUsableKeyEverywhere(table, column));
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = column;
+                }
             }
-            return first;
+            return best;
+        }
+
+        /// <summary>
+        /// 主键列打分（越高越像主键）：
+        /// ① 名字就是 ID/Id/id（工程里第一主键列几乎都叫这个）→ +100；
+        /// ② 名字以 ID/Id 开头（ID_i、Id_s…）→ +60；
+        /// ③ 非字符串类型（int/long/枚举）→ +2，字符串 +0；
+        /// ④ 每一行都有合法值 → +30。
+        ///
+        /// 权重为什么这么排：ID 命名是**强约定**（+100/+60 保证它压过"另一列每行都有值"的 +30），
+        /// 这样 <c>BuildingConfig</c> 的主键才是 <c>ID_i</c> 而不是被尾部图例行挤掉的 <c>Bz_s</c>；
+        /// 而表里压根没有 ID 列时，+30 又能让"每行都有值"的列胜过一个一行空一行的数值列。
+        /// </summary>
+        private static int ScoreKeyColumn(string column, CExcelFieldKind kind, bool usableEverywhere)
+        {
+            string name = KeyNamePart(column);
+            int score = 0;
+            if (string.Equals(name, "ID", StringComparison.OrdinalIgnoreCase)) score += 100;
+            else if (name.StartsWith("ID", StringComparison.OrdinalIgnoreCase)) score += 60;
+            if (kind != CExcelFieldKind.String) score += 2;
+            if (usableEverywhere) score += 30;
+            return score;
+        }
+
+        /// <summary>列名去掉类型后缀后的名字部分（<c>ID_i</c> → <c>ID</c>、<c>State_e:MyEnum</c> → <c>State</c>）。</summary>
+        private static string KeyNamePart(string column)
+        {
+            string name = CExcelTypeInfer.SuffixHead(column) ?? column;
+            int underscore = name.LastIndexOf('_');
+            return underscore > 0 ? name.Substring(0, underscore) : name;
         }
 
         private static bool ColumnIsUsableKeyEverywhere(CExcelTable table, string column)
@@ -740,7 +854,7 @@ namespace CoffeeBean
 
         // ========== JSON 生成 ==========
 
-        private static string WriteJson(CExcelTable table, char[] arraySeparators)
+        private static string WriteJson(CExcelTable table, char[] arraySeparators, bool legacy = false)
         {
             var sb = new StringBuilder();
             sb.Append("{\"data\":[");
@@ -754,7 +868,11 @@ namespace CoffeeBean
                 {
                     if (!first) sb.Append(',');
                     first = false;
-                    sb.Append(CExcelCellJson.Quote(CExcelTypeInfer.ToFieldName(column))).Append(':');
+                    // 键名与生成字段同名（Legacy = 原样列名）：Newtonsoft 匹配虽不区分大小写，
+                    // 但两边一致才好在排查时直接对照 JSON 与字段
+                    sb.Append(CExcelCellJson.Quote(legacy
+                        ? CExcelTypeInfer.ToLegacyFieldName(column)
+                        : CExcelTypeInfer.ToFieldName(column))).Append(':');
                     object value = row.TryGetValue(column, out object v) ? v : null;
                     table.Enums.TryGetValue(column, out CExcelEnumDef enumDef);
                     sb.Append(CExcelCellJson.Literal(CExcelValue.ToText(value), table.Kinds[column], enumDef, arraySeparators, out _));
@@ -784,11 +902,11 @@ namespace CoffeeBean
             return comment;
         }
 
-        /// <summary>写字段声明（含注释）。</summary>
-        private static void AppendField(StringBuilder sb, CExcelTable table, string column, string indent)
+        /// <summary>写字段声明（含注释）。<paramref name="legacy"/> = Legacy 风格（字段名原样，不做 PascalCase）。</summary>
+        private static void AppendField(StringBuilder sb, CExcelTable table, string column, string indent, bool legacy = false)
         {
             string type = table.CSharpTypeOf(column);
-            string field = CExcelTypeInfer.ToFieldName(column);
+            string field = legacy ? CExcelTypeInfer.ToLegacyFieldName(column) : CExcelTypeInfer.ToFieldName(column);
             sb.AppendLine(indent + "/// <summary>" + FieldComment(table, column) + "</summary>");
             sb.AppendLine(indent + "public " + type + " " + field + ";");
         }
@@ -902,6 +1020,633 @@ namespace CoffeeBean
             sb.AppendLine("    public sealed class " + rowName + " : " + frontName + "Base");
             sb.AppendLine("    {");
             sb.AppendLine("    }");
+            sb.AppendLine("}");
+            return sb.ToString();
+        }
+
+        // ========== Legacy 风格：与项目既有 <T>_DataGetter 同名同形 ==========
+        //
+        // 为什么单独一套：真实工程里已经有 55 个 *_DataGetter.cs、上百处调用点（GetDataByID/GetArray/
+        // GetDataByIndex/GetArrayLenth/GetDataNullID/GetDataBySameID/...）。要让生成产物**直接替换**它们、
+        // 业务代码一行不改，就必须连类名、文件名、成员名、日志文案都对齐 —— 那套名字是项目的既成接口，
+        // 不能靠"更现代"去说服 139 个调用点改代码。
+        //
+        // 与我们 Modern 风格的差异：
+        //   1. 类名 <T>_DataGetter / <T>_PropertyBase / <T>_DataBase（+ 章节表的 <T>_<N>_Data 子类）；
+        //   2. 查询成员名 GetDataByID / GetDataNullID / GetDataByIndex / GetDataNullIndexNull /
+        //      GetArray / GetArrayLenth（原样保留项目里的拼写，含 Lenth 这个笔误）、Get<字段>ProptyList；
+        //   3. 章节表每个成员带 `int chapterID = -1`，-1 = 当前章节；
+        //   4. 类不放在命名空间里（与项目一致，业务代码无需 using）。
+        //
+        // 保留的项目语义（照抄，别"优化"）：
+        //   GetDataByID 找不到 → LogError + 给**首行**（id<=0）或**末行**；GetDataNullID 找不到 → LogError + null；
+        //   GetDataByIndex 越界 → LogError + 给首/末行；GetDataNullIndexNull 越界 → LogError + null；
+        //   章节没配置 → LogWarning + 给最后一章数据。空表额外加了保护（老代码直接 DataArray[0] 会越界崩）。
+
+        private static void AppendLegacyFileHeader(StringBuilder sb, CExcelTable table, string ns)
+        {
+            sb.AppendLine(HeaderLine);
+            sb.AppendLine(TemplateLine);
+            sb.AppendLine("// Source sheet: " + table.SheetName);
+            sb.AppendLine("using System;");
+            sb.AppendLine("using System.Collections.Generic;");
+            sb.AppendLine("using UnityEngine;");
+            if (!string.IsNullOrEmpty(ns)) sb.AppendLine("using " + ns + ";");
+            sb.AppendLine();
+        }
+
+        /// <summary>属性父类：字段与 Modern 风格完全一致（同一张表 → 同一批字段名/类型）。</summary>
+        private static void AppendLegacyPropertyBase(StringBuilder sb, CExcelTable table, string typeName)
+        {
+            sb.AppendLine("//属性父类");
+            sb.AppendLine("[System.Serializable]");
+            sb.AppendLine("public class " + typeName);
+            sb.AppendLine("{");
+            foreach (string column in table.Columns)
+                AppendField(sb, table, column, "    ", true);
+            sb.AppendLine("}");
+            AppendEnums(sb, table, "");
+        }
+
+        /// <summary>对象父类：数组 + 查询方法 + 每字段 ProptyList（成员名/语义与项目既有 _DataBase 一致）。</summary>
+        private static void AppendLegacyDataBase(StringBuilder sb, CExcelTable table, string tableName, string propType,
+            string keyType, string keyField)
+        {
+            bool hasKey = !string.IsNullOrEmpty(keyField);
+            sb.AppendLine("//对象父类");
+            sb.AppendLine("[System.Serializable]");
+            sb.AppendLine("public class " + tableName + "_DataBase");
+            sb.AppendLine("{");
+            sb.AppendLine("    //对象数组");
+            sb.AppendLine("    public " + propType + "[] DataArray;");
+            if (hasKey)
+            {
+                sb.AppendLine("    //临时字典");
+                sb.AppendLine("    public Dictionary<" + keyType + ", " + propType + "> DataDictionary = new Dictionary<" + keyType + ", " + propType + ">();");
+            }
+            sb.AppendLine("    //对象数组长度");
+            sb.AppendLine("    public int ArrayLength;");
+            sb.AppendLine();
+            if (hasKey)
+            {
+                sb.AppendLine("    //通过ID获取数据,没有返回最后一个ID数据");
+                sb.AppendLine("    public " + propType + " GetDataByID(" + keyType + " _id)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        if (ArrayLength == 0)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            Debug.LogError(\"表格：" + tableName + " 数据为空（一行都没有）\");");
+                sb.AppendLine("            return null;");
+                sb.AppendLine("        }");
+                sb.AppendLine("        if (DataDictionary.ContainsKey(_id))");
+                sb.AppendLine("        {");
+                sb.AppendLine("            return DataDictionary[_id];");
+                sb.AppendLine("        }");
+                sb.AppendLine("        for (int i = 0; i < ArrayLength; i++)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            if (!DataDictionary.ContainsKey(DataArray[i]." + keyField + "))");
+                sb.AppendLine("            {");
+                sb.AppendLine("                DataDictionary.Add(DataArray[i]." + keyField + ", DataArray[i]);");
+                sb.AppendLine("                if (DataArray[i]." + keyField + " == _id)");
+                sb.AppendLine("                {");
+                sb.AppendLine("                    return DataArray[i];");
+                sb.AppendLine("                }");
+                sb.AppendLine("            }");
+                sb.AppendLine("        }");
+                sb.AppendLine("        Debug.LogError(\"表格：" + tableName + " 中找不到ID： \"+ _id);");
+                sb.AppendLine("        if (" + (string.Equals(keyType, "string", StringComparison.Ordinal) ? "string.IsNullOrEmpty(_id)" : "_id<=0") + ")");
+                sb.AppendLine("        {");
+                sb.AppendLine("            return DataArray[0];");
+                sb.AppendLine("        }");
+                sb.AppendLine("        else");
+                sb.AppendLine("        {");
+                sb.AppendLine("            return DataArray[ArrayLength - 1];");
+                sb.AppendLine("        }");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    //通过ID获取数据,有空");
+                sb.AppendLine("    public " + propType + " GetDataNullID(" + keyType + " _id)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        if (ArrayLength == 0)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            Debug.LogError(\"表格：" + tableName + " 数据为空（一行都没有）\");");
+                sb.AppendLine("            return null;");
+                sb.AppendLine("        }");
+                sb.AppendLine("        if (DataDictionary.ContainsKey(_id))");
+                sb.AppendLine("        {");
+                sb.AppendLine("            return DataDictionary[_id];");
+                sb.AppendLine("        }");
+                sb.AppendLine("        for (int i = 0; i < ArrayLength; i++)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            if (!DataDictionary.ContainsKey(DataArray[i]." + keyField + "))");
+                sb.AppendLine("            {");
+                sb.AppendLine("                DataDictionary.Add(DataArray[i]." + keyField + ", DataArray[i]);");
+                sb.AppendLine("                if (DataArray[i]." + keyField + " == _id)");
+                sb.AppendLine("                {");
+                sb.AppendLine("                    return DataArray[i];");
+                sb.AppendLine("                }");
+                sb.AppendLine("            }");
+                sb.AppendLine("        }");
+                sb.AppendLine("        Debug.LogError(\"表格：" + tableName + " 中找不到ID： \"+ _id);");
+                sb.AppendLine("        return null;");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    //临时等级字典：缓存 ID -> 该 ID 的全部数据，避免重复遍历");
+                sb.AppendLine("    public Dictionary<" + keyType + ", List<" + propType + ">> DataID_Levs = new Dictionary<" + keyType + ", List<" + propType + ">>();");
+                sb.AppendLine();
+                sb.AppendLine("    /// <summary>");
+                sb.AppendLine("    /// 根据ID获取第lev个数据（lev 从 1 开始）。");
+                sb.AppendLine("    /// 有该ID但数量不足 lev → 返回最后一条并警告；完全没有该ID → 返回数组首元素。");
+                sb.AppendLine("    /// </summary>");
+                sb.AppendLine("    public " + propType + " GetDataBySameID(" + keyType + " _id, int _lev)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        if (ArrayLength == 0)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            Debug.LogError(\"表格：" + tableName + " 数据为空（一行都没有）\");");
+                sb.AppendLine("            return null;");
+                sb.AppendLine("        }");
+                sb.AppendLine("        if (_lev < 1)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            Debug.LogError(\"表格：" + tableName + " lev参数不能小于1，当前传入：\" + _lev);");
+                sb.AppendLine("            return DataArray[0];");
+                sb.AppendLine("        }");
+                sb.AppendLine("        List<" + propType + "> dataList = GetSameIDList(_id);");
+                sb.AppendLine("        if (dataList.Count == 0)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            Debug.LogError(\"表格：" + tableName + " 中完全找不到ID：\" + _id + \" 对应数据\");");
+                sb.AppendLine("            return DataArray[0];");
+                sb.AppendLine("        }");
+                sb.AppendLine("        if (_lev > dataList.Count)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            Debug.LogWarning(\"表格：" + tableName + " ID=\" + _id + \" 仅有\" + dataList.Count + \"条，不足要求lev=\" + _lev + \"，返回最后一条匹配数据\");");
+                sb.AppendLine("            return dataList[dataList.Count - 1];");
+                sb.AppendLine("        }");
+                sb.AppendLine("        return dataList[_lev - 1];");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    /// <summary>获取该ID的最后一条数据（重复ID段的最后一条）。</summary>");
+                sb.AppendLine("    public " + propType + " GetDataBySameIDMaxlev(" + keyType + " _id)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        if (ArrayLength == 0)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            Debug.LogError(\"表格：" + tableName + " 数据为空（一行都没有）\");");
+                sb.AppendLine("            return null;");
+                sb.AppendLine("        }");
+                sb.AppendLine("        List<" + propType + "> dataList = GetSameIDList(_id);");
+                sb.AppendLine("        if (dataList.Count == 0)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            Debug.LogError(\"表格：" + tableName + " 中完全找不到ID：\" + _id + \" 对应数据\");");
+                sb.AppendLine("            return DataArray[0];");
+                sb.AppendLine("        }");
+                sb.AppendLine("        return dataList[dataList.Count - 1];");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    //同ID的全部数据（带缓存；同ID必须连续排布，同ID段内按出现顺序）");
+                sb.AppendLine("    private List<" + propType + "> GetSameIDList(" + keyType + " _id)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        List<" + propType + "> dataList;");
+                sb.AppendLine("        if (DataID_Levs.TryGetValue(_id, out dataList))");
+                sb.AppendLine("        {");
+                sb.AppendLine("            return dataList;");
+                sb.AppendLine("        }");
+                sb.AppendLine("        dataList = new List<" + propType + ">();");
+                sb.AppendLine("        for (int i = 0; i < ArrayLength; i++)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            if (DataArray[i]." + keyField + " == _id) dataList.Add(DataArray[i]);");
+                sb.AppendLine("        }");
+                sb.AppendLine("        DataID_Levs.Add(_id, dataList);");
+                sb.AppendLine("        return dataList;");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+            }
+            sb.AppendLine("    //通过下标获取数据,没有返回最后一个ID数据");
+            sb.AppendLine("    public " + propType + " GetDataByIndex(int _index)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        if (ArrayLength == 0)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            Debug.LogError(\"表格：" + tableName + " 数据为空（一行都没有）\");");
+            sb.AppendLine("            return null;");
+            sb.AppendLine("        }");
+            sb.AppendLine("        if (_index < 0 || _index >= ArrayLength)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            Debug.LogError(\"表格：" + tableName + " 中下标越界： \"+ _index);");
+            sb.AppendLine("            if (_index<0)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                return DataArray[0];");
+            sb.AppendLine("            }");
+            sb.AppendLine("            else");
+            sb.AppendLine("            {");
+            sb.AppendLine("                return DataArray[ArrayLength - 1];");
+            sb.AppendLine("            }");
+            sb.AppendLine("        }");
+            sb.AppendLine("        return DataArray[_index];");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    //通过下标获取数据,没有返回null");
+            sb.AppendLine("    public " + propType + " GetDataNullIndexNull(int _index)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        if (_index < 0 || _index >= ArrayLength)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            Debug.LogError(\"表格：" + tableName + " 中下标越界： \"+ _index);");
+            sb.AppendLine("            return null;");
+            sb.AppendLine("        }");
+            sb.AppendLine("        return DataArray[_index];");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            AppendLegacyProptyLists(sb, table, propType, "    ");
+            sb.AppendLine("}");
+        }
+
+        /// <summary>每字段一个 <c>Get&lt;字段&gt;ProptyList()</c>（成员名与项目既有代码逐字一致）。</summary>
+        private static void AppendLegacyProptyLists(StringBuilder sb, CExcelTable table, string propType, string indent)
+        {
+            sb.AppendLine(indent + "#region 将字段装入List");
+            foreach (string column in table.Columns)
+            {
+                string field = CExcelTypeInfer.ToLegacyFieldName(column);
+                string type = table.CSharpTypeOf(column);
+                sb.AppendLine(indent + "/// <summary>" + FieldComment(table, column) + "</summary>");
+                sb.AppendLine(indent + "public List<" + type + "> Get" + field + "ProptyList()");
+                sb.AppendLine(indent + "{");
+                sb.AppendLine(indent + "    List<" + type + "> tempList = new List<" + type + ">(ArrayLength);");
+                sb.AppendLine(indent + "    for (int i = 0; i < ArrayLength; i++)");
+                sb.AppendLine(indent + "    {");
+                sb.AppendLine(indent + "        tempList.Add(DataArray[i]." + field + ");");
+                sb.AppendLine(indent + "    }");
+                sb.AppendLine(indent + "    return tempList;");
+                sb.AppendLine(indent + "}");
+                sb.AppendLine();
+            }
+            sb.AppendLine(indent + "#endregion");
+        }
+
+        /// <summary>Legacy：普通单表 → 一个文件 <c>&lt;T&gt;_DataGetter.cs</c>（Getter + PropertyBase + DataBase）。</summary>
+        private static string WriteLegacyGetter(CExcelTable table, string className, string ns, string dataRelativePath)
+        {
+            bool hasKey = !string.IsNullOrEmpty(table.PrimaryKey);
+            string keyType = hasKey ? table.CSharpTypeOf(table.PrimaryKey) : "int";
+            string keyField = hasKey ? CExcelTypeInfer.ToLegacyFieldName(table.PrimaryKey) : null;
+            string propType = className + "_PropertyBase";
+            string dbType = className + "_DataBase";
+            string dataType = className + "_Data";
+
+            var sb = new StringBuilder();
+            AppendLegacyFileHeader(sb, table, ns);
+            sb.AppendLine("/// <summary>" + className + " 数据访问（自动生成；类名/成员名与项目既有 *_DataGetter 一致）。</summary>");
+            sb.AppendLine("public class " + className + "_DataGetter");
+            sb.AppendLine("{");
+            sb.AppendLine("    private const string DataPath = \"" + dataRelativePath + "\";");
+            sb.AppendLine();
+            sb.AppendLine("    private static " + dataType + " m_" + className + "_Data;");
+            sb.AppendLine("    private static " + dataType + " M_" + className + "_Data");
+            sb.AppendLine("    {");
+            sb.AppendLine("        get");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (m_" + className + "_Data == null) ApplyContainer(ConfigTableRuntime.ReadData(DataPath));");
+            sb.AppendLine("            return m_" + className + "_Data;");
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    /// <summary>取整表数据（懒加载）。</summary>");
+            sb.AppendLine("    public static " + dbType + " GetData()");
+            sb.AppendLine("    {");
+            sb.AppendLine("        return M_" + className + "_Data;");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            // 无键表：_DataBase 里没有 GetDataByID / GetDataNullID / SameID → 这里一并跳过（否则生成物编译不过）
+            if (hasKey)
+            {
+                sb.AppendLine("    //通过ID拿数据,没有返回最后一个ID数据");
+                sb.AppendLine("    public static " + propType + " GetDataByID(" + keyType + " id)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        return GetData().GetDataByID(id);");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    //通过ID拿数据,没有返回Null");
+                sb.AppendLine("    public static " + propType + " GetDataNullID(" + keyType + " id)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        return GetData().GetDataNullID(id);");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    //通过ID(相同ID)拿数据--默认lev下标从1开始");
+                sb.AppendLine("    public static " + propType + " GetDataBySameID(" + keyType + " id, int lev)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        return GetData().GetDataBySameID(id, lev);");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    //通过ID(相同ID)拿数据--最大lev");
+                sb.AppendLine("    public static " + propType + " GetDataBySameIDMaxlev(" + keyType + " id)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        return GetData().GetDataBySameIDMaxlev(id);");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+            }
+            sb.AppendLine("    //通过下标拿数据,没有返回最后一个数据");
+            sb.AppendLine("    public static " + propType + " GetDataByIndex(int index)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        return GetData().GetDataByIndex(index);");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    //通过下标拿数据,没有返回null");
+            sb.AppendLine("    public static " + propType + " GetDataNullIndexNull(int index)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        return GetData().GetDataNullIndexNull(index);");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    //获取数组长度");
+            sb.AppendLine("    public static int GetArrayLenth()");
+            sb.AppendLine("    {");
+            sb.AppendLine("        return GetData().ArrayLength;");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    //获取数组");
+            sb.AppendLine("    public static " + propType + "[] GetArray()");
+            sb.AppendLine("    {");
+            sb.AppendLine("        return GetData().DataArray;");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    #region 将字段装入List");
+            foreach (string column in table.Columns)
+            {
+                string field = CExcelTypeInfer.ToLegacyFieldName(column);
+                string type = table.CSharpTypeOf(column);
+                sb.AppendLine("    /// <summary>" + FieldComment(table, column) + "</summary>");
+                sb.AppendLine("    public List<" + type + "> Get" + field + "ProptyList()");
+                sb.AppendLine("    {");
+                sb.AppendLine("        return GetData().Get" + field + "ProptyList();");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+            }
+            sb.AppendLine("    #endregion");
+            sb.AppendLine();
+            AppendLegacyRuntimeSupport(sb, className, new List<int>(), null);
+            sb.AppendLine("}");
+            sb.AppendLine();
+            AppendLegacyPropertyBase(sb, table, propType);
+            sb.AppendLine();
+            AppendLegacyDataBase(sb, table, className, propType, keyType, keyField);
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Legacy 的运行期支撑（自注册 + 容器灌入 + 重载）。
+        /// 单表：<paramref name="dataClassName"/> = 表名、<paramref name="chapters"/> 为空；
+        /// 章节族：<paramref name="chapters"/> 非空，<paramref name="dataClassName"/> = 章节前缀。
+        /// </summary>
+        private static void AppendLegacyRuntimeSupport(StringBuilder sb, string dataClassName, List<int> chapters, string dataPrefix)
+        {
+            bool isChapter = chapters != null && chapters.Count > 0;
+            string dbType = dataClassName + "_DataBase";
+            if (!isChapter)
+            {
+                sb.AppendLine("    /// <summary>丢弃缓存；下次访问重新读数据文件（热更后用）。</summary>");
+                sb.AppendLine("    public static void Reload()");
+                sb.AppendLine("    {");
+                sb.AppendLine("        m_" + dataClassName + "_Data = null;");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    /// <summary>直接灌入容器字节（预加载/热更/测试用）。</summary>");
+                sb.AppendLine("    public static void LoadFrom(byte[] container)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        ApplyContainer(container);");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    /// <summary>把容器字节解出来灌进缓存（ConfigTableRuntime.PreloadAll 调用）。</summary>");
+                sb.AppendLine("    internal static void ApplyContainer(byte[] container)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        " + dataClassName + "_Data data = new " + dataClassName + "_Data();");
+                sb.AppendLine("        data.DataArray = ConfigTableRuntime.DecodeRows<" + dataClassName + "_PropertyBase>(container, \"" + dataClassName + "\");");
+                sb.AppendLine("        data.ArrayLength = data.DataArray.Length;");
+                sb.AppendLine("        m_" + dataClassName + "_Data = data;");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    private sealed class Registration : IConfigTable");
+                sb.AppendLine("    {");
+                sb.AppendLine("        public string DataRelativePath { get { return DataPath; } }");
+                sb.AppendLine("        public void Apply(byte[] container) { ApplyContainer(container); }");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]");
+                sb.AppendLine("    private static void __Register()");
+                sb.AppendLine("    {");
+                sb.AppendLine("        ConfigTableRuntime.Register(new Registration());");
+                sb.AppendLine("    }");
+                return;
+            }
+
+            sb.AppendLine("    /// <summary>丢弃全部章节缓存；下次访问重新读数据文件（热更后用）。</summary>");
+            sb.AppendLine("    public static void Reload()");
+            sb.AppendLine("    {");
+            foreach (int chapter in chapters)
+                sb.AppendLine("        m_" + dataClassName + "_" + chapter + "_Data = null;");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    /// <summary>直接灌入某章节的容器字节（预加载/热更/测试用）。</summary>");
+            sb.AppendLine("    public static void LoadFrom(int chapterID, byte[] container)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        ApplyChapter(chapterID, container);");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    /// <summary>把某章节的容器字节解出来灌进缓存（ConfigTableRuntime.PreloadAll 调用）。</summary>");
+            sb.AppendLine("    internal static void ApplyChapter(int chapterID, byte[] container)");
+            sb.AppendLine("    {");
+            foreach (int chapter in chapters)
+            {
+                sb.AppendLine("        if (chapterID == " + chapter + ")");
+                sb.AppendLine("        {");
+                sb.AppendLine("            " + dataClassName + "_" + chapter + "_Data data = new " + dataClassName + "_" + chapter + "_Data();");
+                sb.AppendLine("            data.DataArray = ConfigTableRuntime.DecodeRows<" + dataClassName + "_PropertyBase>(container, \"" + dataClassName + "_" + chapter + "\");");
+                sb.AppendLine("            data.ArrayLength = data.DataArray.Length;");
+                sb.AppendLine("            m_" + dataClassName + "_" + chapter + "_Data = data;");
+                sb.AppendLine("            return;");
+                sb.AppendLine("        }");
+            }
+            sb.AppendLine("        Debug.LogError(\"[" + dataClassName + "] 没有第 \" + chapterID + \" 章节的数据文件\");");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    private sealed class Registration : IConfigTable");
+            sb.AppendLine("    {");
+            sb.AppendLine("        private readonly int _chapter;");
+            sb.AppendLine("        public Registration(int chapter) { _chapter = chapter; }");
+            sb.AppendLine("        public string DataRelativePath { get { return \"" + dataPrefix + "\" + _chapter + ConfigTableRuntime.DataExtension; } }");
+            sb.AppendLine("        public void Apply(byte[] container) { ApplyChapter(_chapter, container); }");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]");
+            sb.AppendLine("    private static void __Register()");
+            sb.AppendLine("    {");
+            sb.AppendLine("        foreach (int chapter in Chapters) ConfigTableRuntime.Register(new Registration(chapter));");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    /// <summary>可用章节号（升序）。</summary>");
+            sb.AppendLine("    public static readonly int[] Chapters = new[] { " + string.Join(", ",
+                chapters.Select(i => i.ToString(CultureInfo.InvariantCulture))) + " };");
+            sb.AppendLine();
+            sb.AppendLine("    /// <summary>章节数量。</summary>");
+            sb.AppendLine("    public static int ChapterCount");
+            sb.AppendLine("    {");
+            sb.AppendLine("        get { return Chapters.Length; }");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    private static readonly HashSet<int> WarnedMissingChapters = new HashSet<int>();");
+            sb.AppendLine();
+            sb.AppendLine("    /// <summary>把章节号解析成实际存在的章节：-1 = 当前章节；没配置 → 警告 + 最后一章。</summary>");
+            sb.AppendLine("    private static int ResolveChapter(int chapterID)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        if (chapterID == -1)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            chapterID = ConfigTableRuntime.CurrentChapterId;");
+            sb.AppendLine("        }");
+            foreach (int chapter in chapters)
+                sb.AppendLine("        if (chapterID == " + chapter + ") return chapterID;");
+            sb.AppendLine("        if (WarnedMissingChapters.Add(chapterID))");
+            sb.AppendLine("        {");
+            sb.AppendLine("            Debug.LogWarning(\"策划没有配置 第\" + chapterID + \"章节    " + dataClassName
+                              + "_DataGetter 数据表,默认给上一章节数据\");");
+            sb.AppendLine("        }");
+            sb.AppendLine("        return " + chapters[chapters.Count - 1] + ";");
+            sb.AppendLine("    }");
+        }
+
+        /// <summary>
+        /// Legacy：章节族聚合文件 <c>&lt;前缀&gt;_DataGetter.cs</c>
+        /// （每章节一个 <c>&lt;前缀&gt;_&lt;N&gt;_Data</c> 静态缓存 + 全部成员带 <c>int chapterID = -1</c>）。
+        /// </summary>
+        private static string WriteLegacyChapterFamily(CExcelTable table, string frontName, List<int> chapters, string ns)
+        {
+            bool hasKey = !string.IsNullOrEmpty(table.PrimaryKey);
+            string keyType = hasKey ? table.CSharpTypeOf(table.PrimaryKey) : "int";
+            string keyField = hasKey ? CExcelTypeInfer.ToLegacyFieldName(table.PrimaryKey) : null;
+            string propType = frontName + "_PropertyBase";
+            string dbType = frontName + "_DataBase";
+            string dataPrefix = frontName + "/Data/" + frontName + "_";
+
+            var sb = new StringBuilder();
+            AppendLegacyFileHeader(sb, table, ns);
+            sb.AppendLine("/// <summary>" + frontName + " 多章节数据访问（自动生成；章节号省略 = 当前章节）。</summary>");
+            sb.AppendLine("public class " + frontName + "_DataGetter");
+            sb.AppendLine("{");
+            sb.AppendLine("    #region 数据读取");
+            foreach (int chapter in chapters)
+            {
+                string chapterType = frontName + "_" + chapter + "_Data";
+                sb.AppendLine("    private static " + chapterType + " m_" + frontName + "_" + chapter + "_Data;");
+                sb.AppendLine("    private static " + chapterType + " M_" + frontName + "_" + chapter + "_Data");
+                sb.AppendLine("    {");
+                sb.AppendLine("        get");
+                sb.AppendLine("        {");
+                sb.AppendLine("            if (m_" + frontName + "_" + chapter + "_Data == null)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                m_" + frontName + "_" + chapter + "_Data = new " + chapterType + "();");
+                sb.AppendLine("                m_" + frontName + "_" + chapter + "_Data.DataArray = ConfigTableRuntime.LoadRows<" + propType
+                                  + ">(\"" + dataPrefix + chapter + "\" + ConfigTableRuntime.DataExtension);");
+                sb.AppendLine("                m_" + frontName + "_" + chapter + "_Data.ArrayLength = m_" + frontName + "_" + chapter + "_Data.DataArray.Length;");
+                sb.AppendLine("            }");
+                sb.AppendLine("            return m_" + frontName + "_" + chapter + "_Data;");
+                sb.AppendLine("        }");
+                sb.AppendLine("    }");
+            }
+            sb.AppendLine();
+            sb.AppendLine("    #endregion");
+            sb.AppendLine();
+            AppendLegacyRuntimeSupport(sb, frontName, chapters, dataPrefix);
+            sb.AppendLine();
+            sb.AppendLine("    //获取对应章节的数据");
+            sb.AppendLine("    public static " + dbType + " GetData(int chapterID = -1)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        chapterID = ResolveChapter(chapterID);");
+            foreach (int chapter in chapters)
+                sb.AppendLine("        if (chapterID == " + chapter + ") return M_" + frontName + "_" + chapter + "_Data;");
+            sb.AppendLine("        return M_" + frontName + "_" + chapters[chapters.Count - 1] + "_Data;");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            if (hasKey)
+            {
+                sb.AppendLine("    //通过ID拿数据,没有返回最后一个ID数据");
+                sb.AppendLine("    public static " + propType + " GetDataByID(" + keyType + " id, int chapterID = -1)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        return GetData(chapterID).GetDataByID(id);");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    //通过ID拿数据,没有返回Null");
+                sb.AppendLine("    public static " + propType + " GetDataNullID(" + keyType + " id, int chapterID = -1)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        return GetData(chapterID).GetDataNullID(id);");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    //通过ID(相同ID)拿数据--默认lev下标从1开始");
+                sb.AppendLine("    public static " + propType + " GetDataBySameID(" + keyType + " id, int lev, int chapterID = -1)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        return GetData(chapterID).GetDataBySameID(id, lev);");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    //通过ID(相同ID)拿数据--最大lev");
+                sb.AppendLine("    public static " + propType + " GetDataBySameIDMaxlev(" + keyType + " id, int chapterID = -1)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        return GetData(chapterID).GetDataBySameIDMaxlev(id);");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+            }
+            sb.AppendLine("    //通过下标拿数据,没有返回最后一个数据");
+            sb.AppendLine("    public static " + propType + " GetDataByIndex(int index, int chapterID = -1)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        return GetData(chapterID).GetDataByIndex(index);");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    //通过下标拿数据,没有返回null");
+            sb.AppendLine("    public static " + propType + " GetDataNullIndexNull(int index, int chapterID = -1)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        return GetData(chapterID).GetDataNullIndexNull(index);");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    //获取数组长度");
+            sb.AppendLine("    public static int GetArrayLenth(int chapterID = -1)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        return GetData(chapterID).ArrayLength;");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    //获取数组");
+            sb.AppendLine("    public static " + propType + "[] GetArray(int chapterID = -1)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        return GetData(chapterID).DataArray;");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    #region 将字段装入List");
+            foreach (string column in table.Columns)
+            {
+                string field = CExcelTypeInfer.ToLegacyFieldName(column);
+                string type = table.CSharpTypeOf(column);
+                sb.AppendLine("    /// <summary>" + FieldComment(table, column) + "</summary>");
+                sb.AppendLine("    public List<" + type + "> Get" + field + "ProptyList(int chapterID = -1)");
+                sb.AppendLine("    {");
+                sb.AppendLine("        return GetData(chapterID).Get" + field + "ProptyList();");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+            }
+            sb.AppendLine("    #endregion");
+            sb.AppendLine("}");
+            sb.AppendLine();
+            AppendLegacyPropertyBase(sb, table, propType);
+            sb.AppendLine();
+            AppendLegacyDataBase(sb, table, frontName, propType, keyType, keyField);
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Legacy：每个表/章节的数据子类（空壳 <c>&lt;X&gt;_Data : &lt;表&gt;_DataBase</c>）——
+        /// 与项目既有 <c>&lt;T&gt;_Data.cs</c>（普通表）和 <c>&lt;T&gt;_&lt;N&gt;_Data.cs</c>（章节）逐字对应。
+        /// </summary>
+        private static string WriteLegacyDataSubClass(string subClassName, string baseClassName, string sourceLabel, string ns)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine(HeaderLine);
+            sb.AppendLine(TemplateLine);
+            sb.AppendLine("// Source sheet: " + sourceLabel);
+            if (!string.IsNullOrEmpty(ns)) sb.AppendLine("using " + ns + ";");
+            sb.AppendLine();
+            sb.AppendLine("//数据子类");
+            sb.AppendLine("[System.Serializable]");
+            sb.AppendLine("public class " + subClassName + " : " + baseClassName);
+            sb.AppendLine("{");
             sb.AppendLine("}");
             return sb.ToString();
         }
@@ -1132,6 +1877,15 @@ namespace CoffeeBean
 
             sb.AppendLine("        private static readonly " + baseClass + "[] None = new " + baseClass + "[0];");
             sb.AppendLine();
+            sb.AppendLine("        /// <summary>最后一章：章节号没配置时的兜底章节（对齐项目既有行为：给上一章数据）。</summary>");
+            sb.AppendLine("        private static readonly int LastChapter = " + chapters[chapters.Count - 1] + ";");
+            sb.AppendLine();
+            sb.AppendLine("        /// <summary>已经警告过的缺失章节号（同一个章节只刷一次日志，避免刷屏）。</summary>");
+            sb.AppendLine("        private static readonly HashSet<int> WarnedMissingChapters = new HashSet<int>();");
+            sb.AppendLine();
+            sb.AppendLine("        /// <summary>当前章节号（游戏通过 ConfigTableRuntime.Context 注入；没注入时是 FallbackChapterId）。</summary>");
+            sb.AppendLine("        public static int CurrentChapterId => ConfigTableRuntime.CurrentChapterId;");
+            sb.AppendLine();
             sb.AppendLine("        /// <summary>是否存在该章节（只有存在对应数据文件的章节才会生成进来）。</summary>");
             sb.AppendLine("        public static bool HasChapter(int chapterId)");
             sb.AppendLine("        {");
@@ -1139,10 +1893,26 @@ namespace CoffeeBean
             sb.AppendLine("            return false;");
             sb.AppendLine("        }");
             sb.AppendLine();
-            sb.AppendLine("        /// <summary>取某章节的全部行（基类视角）；章节不存在返回空列表，不抛异常。</summary>");
-            sb.AppendLine("        public static IReadOnlyList<" + baseClass + "> GetChapter(int chapterId)");
+            sb.AppendLine("        /// <summary>");
+            sb.AppendLine("        /// 把外部章节号解析成**实际存在的**章节号：");
+            sb.AppendLine("        /// -1（省略）→ 当前章节（ConfigTableRuntime.CurrentChapterId）；");
+            sb.AppendLine("        /// 没有配置的章节 → 只警告一次并回退到最后一章（不抛异常、不给空数据）。");
+            sb.AppendLine("        /// </summary>");
+            sb.AppendLine("        private static int ResolveChapter(int chapterId)");
             sb.AppendLine("        {");
-            sb.AppendLine("            switch (chapterId)");
+            sb.AppendLine("            if (chapterId == -1) chapterId = ConfigTableRuntime.CurrentChapterId;");
+            sb.AppendLine("            if (HasChapter(chapterId)) return chapterId;");
+            sb.AppendLine("            if (WarnedMissingChapters.Add(chapterId))");
+            sb.AppendLine("            {");
+            sb.AppendLine("                Debug.LogWarning(\"[" + frontName + "] 策划没有配置 第\" + chapterId + \"章节，默认给第 \" + LastChapter + \" 章数据\");");
+            sb.AppendLine("            }");
+            sb.AppendLine("            return LastChapter;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        /// <summary>取某章节的全部行（基类视角）；章节号省略（-1）时取当前章节。</summary>");
+            sb.AppendLine("        public static IReadOnlyList<" + baseClass + "> GetChapter(int chapterId = -1)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            switch (ResolveChapter(chapterId))");
             sb.AppendLine("            {");
             foreach (int chapter in chapters)
             {
@@ -1154,10 +1924,10 @@ namespace CoffeeBean
             sb.AppendLine();
             if (hasKey)
             {
-                sb.AppendLine("        /// <summary>在指定章节里按主键取一行；同一个键有多行时给**第一行**（要全部用 GetAll）；找不到返回 null。</summary>");
-                sb.AppendLine("        public static " + baseClass + " Get(" + keyType + " key, int chapterId)");
+                sb.AppendLine("        /// <summary>在指定章节里按主键取一行；章节号省略（-1）时取当前章节；同一个键有多行时给**第一行**（要全部用 GetAll）；找不到返回 null。</summary>");
+                sb.AppendLine("        public static " + baseClass + " Get(" + keyType + " key, int chapterId = -1)");
                 sb.AppendLine("        {");
-                sb.AppendLine("            switch (chapterId)");
+                sb.AppendLine("            switch (ResolveChapter(chapterId))");
                 sb.AppendLine("            {");
                 foreach (int chapter in chapters)
                 {
@@ -1168,9 +1938,9 @@ namespace CoffeeBean
                 sb.AppendLine("        }");
                 sb.AppendLine();
                 sb.AppendLine("        /// <summary>取指定章节里该键的**全部**行（一个键对应多行、或想稳一点时用它）；没有则返回空列表。</summary>");
-                sb.AppendLine("        public static IReadOnlyList<" + baseClass + "> GetAll(" + keyType + " key, int chapterId)");
+                sb.AppendLine("        public static IReadOnlyList<" + baseClass + "> GetAll(" + keyType + " key, int chapterId = -1)");
                 sb.AppendLine("        {");
-                sb.AppendLine("            switch (chapterId)");
+                sb.AppendLine("            switch (ResolveChapter(chapterId))");
                 sb.AppendLine("            {");
                 foreach (int chapter in chapters)
                 {
@@ -1180,6 +1950,9 @@ namespace CoffeeBean
                 sb.AppendLine("            }");
                 sb.AppendLine("        }");
                 sb.AppendLine();
+                sb.AppendLine("        /// <summary>在当前章节里按主键取一行；找不到返回 false。</summary>");
+                sb.AppendLine("        public static bool TryGet(" + keyType + " key, out " + baseClass + " value) => TryGet(key, -1, out value);");
+                sb.AppendLine();
                 sb.AppendLine("        /// <summary>在指定章节里按主键取一行；找不到返回 false。</summary>");
                 sb.AppendLine("        public static bool TryGet(" + keyType + " key, int chapterId, out " + baseClass + " value)");
                 sb.AppendLine("        {");
@@ -1187,14 +1960,14 @@ namespace CoffeeBean
                 sb.AppendLine("            return value != null;");
                 sb.AppendLine("        }");
                 sb.AppendLine();
-                sb.AppendLine("        /// <summary>指定章节里是否存在该主键。</summary>");
-                sb.AppendLine("        public static bool Contains(" + keyType + " key, int chapterId) => Get(key, chapterId) != null;");
+                sb.AppendLine("        /// <summary>指定章节里是否存在该主键（章节号省略时用当前章节）。</summary>");
+                sb.AppendLine("        public static bool Contains(" + keyType + " key, int chapterId = -1) => Get(key, chapterId) != null;");
                 sb.AppendLine();
             }
             else
             {
                 sb.AppendLine("        // 本表没有可做键的列 → 不生成 Get / GetAll / TryGet / Contains；");
-                sb.AppendLine("        // 请用 GetChapter(chapterId) / ChapterN / HasChapter 访问。");
+                sb.AppendLine("        // 请用 GetChapter(chapterId) / ChapterN / HasChapter 访问（章节号省略 = 当前章节）。");
                 sb.AppendLine();
             }
             sb.AppendLine("        /// <summary>丢弃所有章节缓存；下次访问重新读数据文件（热更后用）。</summary>");

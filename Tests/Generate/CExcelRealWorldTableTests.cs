@@ -113,9 +113,14 @@ namespace CoffeeBean.Excel.Tests
                 "失败时不该产出数据容器文件（空表产物会让运行时以为配置合法可读）");
         }
 
-        /// <summary>ID 列坏、但另一列（Name_s）每行都合法时，主键自动落到那一列 —— 表照样能生成。</summary>
+        /// <summary>
+        /// 有 ID 列时它**就是**主键：即使另一列（Name_s）每行都合法，也不该把主键让出去 ——
+        /// 主键一换，<c>GetDataBySameID</c> 这类接口会**静默给错数据**（实测真实工程里
+        /// BuildingConfig 的主键被选成过备注列 <c>Bz_s</c>、ChapterConfig 被选成 <c>ChapterIndex_s</c>）。
+        /// ID 列整列都坏 → 整表报错，不产出半张表。
+        /// </summary>
         [Test]
-        public void PrimaryKeyFallsBackToTheColumnThatIsValidEverywhere()
+        public void IdColumnWins_EvenWhenAnotherColumnIsValidEverywhere()
         {
             CExcelGenerateResult result = Generate(new[]
             {
@@ -123,23 +128,23 @@ namespace CoffeeBean.Excel.Tests
                 CExcelTestFactory.Row("ID_i", "ID", "Name_s", "B", "Cost_l", 200),
             });
 
-            // 主键落到 Name_s；ID_i 还是错的（文本填进 int 列）→ 仍然报错，但报的是"ID_i 不是整数"
             Assert.IsFalse(result.Success);
-            Assert.IsTrue(result.Issues.Exists(i => i.Column == "ID_i" && i.Message.Contains("不是整数")),
-                string.Join("\n", result.Issues));
-            Assert.IsFalse(result.Issues.Exists(i => i.Message.Contains("跳过")),
-                "主键落在 Name_s 上（每行都合法）→ 一行都不该被跳过，也就不该有跳过警告：" + string.Join("\n", result.Issues));
+            Assert.IsTrue(result.Issues.Exists(i => i.Level == CExcelIssueLevel.Error && i.Column == "ID_i"),
+                "问题应报在主键列 ID_i 上（而不是回退到 Name_s）：" + string.Join("\n", result.Issues));
         }
 
-        /// <summary>主键列选择偏好"每行都有值"的列：ID 列空一片时不该选中它。</summary>
+        /// <summary>
+        /// 表里**没有 ID 列**时，"每行都有值"的列优先于"一行空一行"的数值列（+30 &gt; +2）。
+        /// （有 ID 列时另说：ID 命名是强约定，见 <see cref="IdColumnWins_EvenWhenAnotherColumnIsValidEverywhere"/>。）
+        /// </summary>
         [Test]
         public void PrimaryKeyPrefersColumnThatIsFilledEverywhere()
         {
             CExcelGenerateResult result = Generate(new[]
             {
-                // Note_l 也是可做键的类型，但一行空一行有；Name_s 每行都有值
+                // Note_l / Cost_l 都是可做键的类型，但一行空一行有；Name_s 每行都有值
                 CExcelTestFactory.Row("Note_l", 10, "Name_s", "A", "Cost_l", 100),
-                CExcelTestFactory.Row("Note_l", null, "Name_s", "B", "Cost_l", 200),
+                CExcelTestFactory.Row("Note_l", null, "Name_s", "B", "Cost_l", null),
             });
 
             Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
@@ -155,8 +160,30 @@ namespace CoffeeBean.Excel.Tests
             StringAssert.Contains("public sealed class DataFile { public List<Building> data; }", getter);
         }
 
-        // ========== 真实数组写法 ==========
+        /// <summary>
+        /// 竖排"键值对"表（常量表那类：一行一个常量 = 名字 | 值 | 说明）**跳过**，不报一堆假错误。
+        /// 真实工程里 <c>常量表.xlsx</c>（sheet=AppConst）就是这种布局，它由专用生成器（AppConstGenerator）维护；
+        /// 早先按常规表硬生成，得到的是 24 条"int 列填的值不合法：'GachaFreeCount_i' 不是整数"这类假错误，
+        /// 真正的问题（这表根本不是常规表）反而被淹没。
+        /// </summary>
+        [Test]
+        public void VerticalKeyValueTable_IsSkippedWithWarning_NotFakeErrors()
+        {
+            CExcelGenerateResult result = Generate(new[]
+            {
+                CExcelTestFactory.Row("A", "TestInt_i", "B", 300, "C", "测试整型"),
+                CExcelTestFactory.Row("A", "GachaFreeCount_i", "B", 8, "C", "抽卡每日免费最大次数"),
+            });
 
+            Assert.IsFalse(result.Issues.Exists(i => i.Level == CExcelIssueLevel.Error),
+                "竖排表不该产生假错误：" + string.Join("\n", result.Issues));
+            Assert.IsTrue(result.Issues.Exists(i => i.Level == CExcelIssueLevel.Warning && i.Message.Contains("竖排")),
+                "要明确说明「判定为竖排表，已跳过」：" + string.Join("\n", result.Issues));
+            Assert.IsFalse(File.Exists(CExcelTestFactory.CodePath(_options, "Building", "BuildingGetter.cs")),
+                "跳过的表不该产出代码");
+        }
+
+        // ========== 真实数组写法 ==========
         [Test]
         public void UnderscoreSeparatedArrays_FlowThroughGeneration()
         {

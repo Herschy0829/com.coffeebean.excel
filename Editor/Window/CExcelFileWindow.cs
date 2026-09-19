@@ -125,6 +125,7 @@ namespace CoffeeBean
                 CodeFolder = EditorPrefs.GetString("CoffeeBean.Excel.CodeFolder", "Packages/com.coffeebean.config.generated"),
                 PackageName = EditorPrefs.GetString("CoffeeBean.Excel.PackageName", "com.coffeebean.config.generated"),
                 Namespace = EditorPrefs.GetString("CoffeeBean.Excel.Namespace", "CoffeeBean"),
+                ApiStyle = (CExcelApiStyle)EditorPrefs.GetInt("CoffeeBean.Excel.ApiStyle", (int)CExcelApiStyle.Legacy),
                 SheetName = sheetName,
                 CompressData = EditorPrefs.GetBool("CoffeeBean.Excel.CompressData", true),
                 EncryptData = EditorPrefs.GetBool("CoffeeBean.Excel.EncryptData", true),

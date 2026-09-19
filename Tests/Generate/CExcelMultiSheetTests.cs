@@ -88,13 +88,14 @@ namespace CoffeeBean.Excel.Tests
             StringAssert.Contains("public static IReadOnlyList<ChapterConfigChapter1> Chapter1", getter,
                 "每章节访问器改为只读接口");
             StringAssert.Contains("public static IReadOnlyList<ChapterConfigChapter2> Chapter2", getter);
-            StringAssert.Contains("public static ChapterConfigBase Get(int key, int chapterId)", getter,
-                "按章节取行的方法名是 Get（旧名 GetByID）");
+            StringAssert.Contains("public static ChapterConfigBase Get(int key, int chapterId = -1)", getter,
+                "按章节取行的方法名是 Get（旧名 GetByID），章节号可省略（当前章节）");
             StringAssert.Contains("public static bool TryGet(int key, int chapterId, out ChapterConfigBase value)", getter);
-            StringAssert.Contains("public static bool Contains(int key, int chapterId) => Get(key, chapterId) != null;", getter);
+            StringAssert.Contains("public static bool Contains(int key, int chapterId = -1) => Get(key, chapterId) != null;", getter);
             StringAssert.Contains("public static void Reload()", getter);
             StringAssert.Contains("public static void LoadFrom(int chapterId, byte[] container) => ApplyChapter(chapterId, container);", getter);
-            StringAssert.Contains("public static IReadOnlyList<ChapterConfigBase> GetChapter(int chapterId)", getter);
+            StringAssert.Contains("public static IReadOnlyList<ChapterConfigBase> GetChapter(int chapterId = -1)", getter,
+                "章节号可省略：省略（-1）= 当前章节");
             StringAssert.Contains("default: return None;", getter,
                 "未知章节返回预建的空数组（旧版是 Enumerable.Empty，需要 System.Linq）");
             StringAssert.Contains("where T : ChapterConfigBase", getter);
@@ -117,6 +118,44 @@ namespace CoffeeBean.Excel.Tests
             StringAssert.DoesNotContain("using System.Linq;", getter, "章节 Getter 不再需要 LINQ");
             StringAssert.DoesNotContain("Wrapper", getter, "旧的外层结构类名 Wrapper<T> 已被 DataFile<T> 取代");
             StringAssert.DoesNotContain("GetByID", getter, "旧方法名 GetByID 已被 Get(key, chapterId) 取代");
+        }
+
+        [Test]
+        public void ChapterGetter_DefaultsToInjectedCurrentChapter()
+        {
+            CExcelGenerateOptions options = CExcelTestFactory.TempPackageOptions(_tmpOut);
+            CExcelGenerator.GenerateAllSheets(_tmpXlsx, options);
+            string getter = File.ReadAllText(CExcelTestFactory.CodePath(options, "ChapterConfig", "ChapterConfigGetter.cs"));
+
+            // 方案 B（接口注入）：生成包是独立程序集、引用不到 Assembly-CSharp 里的游戏状态，
+            // 所以"当前章节"只能由游戏在启动早期喂进来，生成代码只读注入值。
+            StringAssert.Contains("public static int CurrentChapterId => ConfigTableRuntime.CurrentChapterId;", getter);
+            StringAssert.Contains("if (chapterId == -1) chapterId = ConfigTableRuntime.CurrentChapterId;", getter,
+                "-1（省略）解析成当前章节");
+            StringAssert.Contains("public static ChapterConfigBase Get(int key, int chapterId = -1)", getter);
+            StringAssert.Contains("public static bool TryGet(int key, out ChapterConfigBase value) => TryGet(key, -1, out value);", getter);
+            StringAssert.Contains("switch (ResolveChapter(chapterId))", getter, "所有章节查询都要先解析章节号");
+
+            // 没配置该章节 → 警告一次 + 回退到最后一章（照抄项目既有行为：策划没配就给上一章数据）
+            StringAssert.Contains("private static readonly int LastChapter = 2;", getter);
+            StringAssert.Contains("if (WarnedMissingChapters.Add(chapterId))", getter, "同一个缺失章节只警告一次，别刷屏");
+            StringAssert.Contains("策划没有配置 第", getter);
+            StringAssert.Contains("默认给第 \" + LastChapter + \" 章数据", getter);
+        }
+
+        [Test]
+        public void RuntimeTemplate_ExposesInjectedConfigContext()
+        {
+            CExcelGenerateOptions options = CExcelTestFactory.TempPackageOptions(_tmpOut);
+            CExcelGenerator.GenerateAllSheets(_tmpXlsx, options);
+            string runtime = File.ReadAllText(Path.Combine(options.CodeFolder, "Runtime", "ConfigTableRuntime.cs"));
+
+            StringAssert.Contains("public interface IConfigContext", runtime, "注入点是一个接口（游戏实现它）");
+            StringAssert.Contains("int CurrentChapterId { get; }", runtime);
+            StringAssert.Contains("public static IConfigContext Context;", runtime);
+            StringAssert.Contains("public static int FallbackChapterId = 1;", runtime,
+                "没注入时回退到第 1 章——对齐项目里的 ?? 1");
+            StringAssert.Contains("尚未注入 IConfigContext", runtime, "缺注入要给出可操作的警告，而不是静默出错");
         }
 
         [Test]
