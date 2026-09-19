@@ -62,6 +62,15 @@ namespace CoffeeBean
         /// <summary>规范列名（表头行非空单元格，别名已归一，按出现顺序）。</summary>
         public List<string> Columns = new List<string>();
 
+        /// <summary>
+        /// 规范列名 → 该名字对应的**全部列字母**（同名列会出现多个）。
+        ///
+        /// **为什么要有它**：真实表里用"同名列横排"表示数组（如 6 个 `RewardID_ia` 列 = 6 元素数组、
+        /// 8 个 `Location_sa` 列 = 8 元素数组），项目既有生成器就是这么读的；老实现按列名去重只留第一列，
+        /// 于是 `RewardID` 只剩第一个值 —— 静默丢数据（实测 66 张表里 1005 格差异的主因）。
+        /// </summary>
+        public Dictionary<string, List<string>> ColumnLetters = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>数据行：规范列名 → 单元格值（null = 空；数字为 double/long，字符串为 string）。</summary>
         public List<Dictionary<string, object>> Rows = new List<Dictionary<string, object>>();
 

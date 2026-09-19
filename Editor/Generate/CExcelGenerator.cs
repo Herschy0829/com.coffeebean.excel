@@ -57,6 +57,12 @@ namespace CoffeeBean
         /// <summary>类名（默认取表名/sheet 名）。</summary>
         public string ClassName;
 
+        /// <summary>
+        /// 列名别名（规范列名 → 该列在表头的写法）。生成时透传给读取器。
+        /// 另外：把**多个表头**都映射到同一个规范列名，就等于声明"同名列横排 = 数组"（每列一个元素）。
+        /// </summary>
+        public Dictionary<string, string[]> ColumnAliases;
+
         /// <summary>主键列名（默认自动选择第一个可做键的列）。</summary>
         public string PrimaryKey;
 
@@ -594,7 +600,7 @@ namespace CoffeeBean
             {
                 string key = path + "|" + sheet;
                 if (_reads.TryGetValue(key, out CExcelReadResult cached)) return cached;
-                CExcelReadResult read = CExcelReader.Read(path, new CExcelReadOptions { SheetName = sheet });
+                CExcelReadResult read = CExcelReader.Read(path, new CExcelReadOptions { SheetName = sheet, ColumnAliases = Options.ColumnAliases });
                 _reads[key] = read;
                 return read;
             }
@@ -703,6 +709,20 @@ namespace CoffeeBean
                 CExcelFieldKind kind = CExcelTypeInfer.Infer(column, values);
                 table.Kinds[column] = kind;
 
+                // 同名列横排但类型不是数组：只能取第一列 —— 说清楚，别让数据静默少了
+                if (!CExcelTypeInfer.IsArray(kind)
+                    && read.ColumnLetters.TryGetValue(column, out List<string> columnLetters) && columnLetters.Count > 1)
+                {
+                    issues.Add(new CExcelIssue
+                    {
+                        Level = CExcelIssueLevel.Warning,
+                        Row = read.HeaderRowIndex + 1,
+                        Column = column,
+                        Message = "列 " + column + " 在表里横排了 " + columnLetters.Count + " 次，但它的类型不是数组 → 只取第一列。"
+                                  + "要用「同名列 = 数组」，请把列名后缀改成数组类型（如 _ia / _sa）",
+                    });
+                }
+
                 if (!CExcelTypeInfer.IsEnumKind(kind)) continue;
 
                 if (presetEnums != null && presetEnums.TryGetValue(column, out CExcelEnumDef preset))
@@ -744,6 +764,7 @@ namespace CoffeeBean
             foreach (string column in table.Columns)
             {
                 if (!CExcelTypeInfer.IsKeyCandidate(table.Kinds[column])) continue;
+                if (IsRemarkLikeColumn(column)) continue;   // 备注/说明列永远不当主键（见方法注释）
                 int score = ScoreKeyColumn(column, table.Kinds[column], ColumnIsUsableKeyEverywhere(table, column));
                 if (score > bestScore)
                 {
@@ -752,6 +773,25 @@ namespace CoffeeBean
                 }
             }
             return best;
+        }
+
+        /// <summary>
+        /// 是不是"备注/说明"这类列（`Bz` / `Bz2` / `BZ` / `Des` / `Desc` / `Note` / `Remark` / `备注` / `说明`）。
+        ///
+        /// **为什么必须排除**：这类列常是表里唯一"每行都有值"的字符串列，自动选主键会选中它；而备注为空的行
+        /// 会被当"说明/图例行"跳过 —— 实测 `PZB_CorrectionMSPD`（老数据 10 行，我们只剩 1 行）、
+        /// `PZB_CorrectionRNG`（9 → 1）就是这么丢数据的。项目既有生成器对这两张表**不设主键**，
+        /// 排除后我们与它一致：无键 + 全行保留。
+        /// </summary>
+        private static bool IsRemarkLikeColumn(string column)
+        {
+            string name = KeyNamePart(column);
+            string[] remarks = { "BZ", "Bz", "Bz1", "Bz2", "Bz3", "bz", "Des", "Desc", "Note", "Remark", "Explain", "备注", "说明", "注释" };
+            foreach (string remark in remarks)
+            {
+                if (string.Equals(name, remark, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -875,7 +915,16 @@ namespace CoffeeBean
                         : CExcelTypeInfer.ToFieldName(column))).Append(':');
                     object value = row.TryGetValue(column, out object v) ? v : null;
                     table.Enums.TryGetValue(column, out CExcelEnumDef enumDef);
-                    sb.Append(CExcelCellJson.Literal(CExcelValue.ToText(value), table.Kinds[column], enumDef, arraySeparators, out _));
+                    // 同名列横排 = 多元素数组（每列一个元素）；标量类型却横排多列 → 只取第一列（另有警告）
+                    if (value is List<string> cells)
+                    {
+                        if (CExcelTypeInfer.IsArray(table.Kinds[column]))
+                            sb.Append(CExcelCellJson.LiteralFromCells(cells, table.Kinds[column], enumDef, arraySeparators, out _));
+                        else
+                            sb.Append(CExcelCellJson.Literal(cells.Count > 0 ? cells[0] : string.Empty, table.Kinds[column], enumDef, arraySeparators, out _));
+                        continue;
+                    }
+                    sb.Append(CExcelCellJson.Literal(CExcelValue.ToText(value), table.Kinds[column], enumDef, arraySeparators, out _, legacy));
                 }
                 sb.Append('}');
             }

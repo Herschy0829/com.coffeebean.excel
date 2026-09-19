@@ -28,7 +28,8 @@ namespace CoffeeBean
             return s;
         }
 
-        /// <summary>单元格值 → 文本（数字去尾零、布尔转 1/0、日期格式化、null → 空串）。</summary>
+        /// <summary>单元格值 → 文本（数字去尾零、布尔转 1/0、日期格式化、null → 空串）。
+        /// <c>List&lt;string&gt;</c> = **同名列多列数组**（见 <see cref="CExcelReadResult.ColumnLetters"/>）→ 用 `,` 连接。</summary>
         public static string ToText(object value)
         {
             switch (value)
@@ -42,6 +43,7 @@ namespace CoffeeBean
                 case int i: return i.ToString();
                 case long l: return l.ToString();
                 case DateTime dt: return dt.ToString("yyyy-MM-dd HH:mm:ss");
+                case List<string> cells: return string.Join(",", cells);
                 default: return value.ToString() ?? string.Empty;
             }
         }

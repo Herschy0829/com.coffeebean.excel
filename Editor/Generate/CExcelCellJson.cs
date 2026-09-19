@@ -48,10 +48,28 @@ namespace CoffeeBean
         /// 单元格文本 → JSON 字面量。<paramref name="error"/> 非空 = 值非法（此时返回默认值，调用方应把它当错误处理）。
         /// </summary>
         public static string Literal(string raw, CExcelFieldKind kind, CExcelEnumDef enumDef, char[] arraySeparators, out string error)
+            => Literal(raw, kind, enumDef, arraySeparators, out error, false);
+
+        /// <param name="emptyArrayAsOneDefaultElement">
+        /// 空单元格 + 数组类型 → 给"1 个默认元素"（`[0]`）而不是空数组 `[]`。
+        /// **Legacy 风格必须开**：项目既有生成器就是这么写的，而业务代码在用常量下标读数组
+        /// （`BuildingItem.cs` 读 `BuildingName[1]`、`BoxDetailPage.cs` 读 `PoolRandom[2]`），
+        /// 空数组会直接 `IndexOutOfRange`。
+        /// </param>
+        public static string Literal(string raw, CExcelFieldKind kind, CExcelEnumDef enumDef, char[] arraySeparators,
+            out string error, bool emptyArrayAsOneDefaultElement)
         {
             error = null;
             string text = (raw ?? string.Empty).Trim();
-            if (text.Length == 0) return DefaultLiteral(kind);
+            if (text.Length == 0)
+            {
+                if (emptyArrayAsOneDefaultElement && CExcelTypeInfer.IsArray(kind))
+                {
+                    CExcelFieldKind elementKind = CExcelTypeInfer.ElementKind(kind);
+                    return "[" + (elementKind == CExcelFieldKind.String ? "\"0\"" : DefaultLiteral(elementKind)) + "]";
+                }
+                return DefaultLiteral(kind);
+            }
 
             // 数组必须先判：EnumArray 也满足 IsEnumKind（它的元素是枚举）
             if (CExcelTypeInfer.IsArray(kind))
@@ -89,6 +107,41 @@ namespace CoffeeBean
             }
 
             return ScalarLiteral(text, kind, out error);
+        }
+
+        /// <summary>
+        /// **同名列横排数组** → JSON 数组：每列一个元素（原样文本，元素内部不再按分隔符拆）。
+        ///
+        /// 对齐项目既有生成器：`RewardID_ia` 在表里横排 6 列 → 6 元素数组；空单元格 → 元素默认值
+        /// （数值 0 / 字符串 "0"）。实测这就是"我们只拿到第一个值"那类数据缺失的根因。
+        /// </summary>
+        public static string LiteralFromCells(List<string> cells, CExcelFieldKind kind, CExcelEnumDef enumDef,
+            char[] arraySeparators, out string error)
+        {
+            error = null;
+            CExcelFieldKind element = CExcelTypeInfer.IsArray(kind) ? CExcelTypeInfer.ElementKind(kind) : kind;
+            var sb = new StringBuilder();
+            sb.Append('[');
+            for (int i = 0; i < cells.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                string text = (cells[i] ?? string.Empty).Trim();
+                if (text.Length == 0)
+                {
+                    sb.Append(element == CExcelFieldKind.String ? "\"0\"" : DefaultLiteral(element));
+                    continue;
+                }
+                string elementError;
+                string literal = Literal(text, element, enumDef, arraySeparators, out elementError);
+                if (elementError != null)
+                {
+                    error = $"同名列第 {i + 1} 列：{elementError}";
+                    return "[]";
+                }
+                sb.Append(literal);
+            }
+            sb.Append(']');
+            return sb.ToString();
         }
 
         /// <summary>只校验（不产出 JSON）：返回 null = 合法。</summary>

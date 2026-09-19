@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 
@@ -14,6 +15,122 @@ namespace CoffeeBean.Excel.Tests
     /// </summary>
     public class CExcelLegacyApiTests
     {
+        /// <summary>
+        /// **同名列横排 = 数组**：表里横排 6 个 `RewardID_ia` 在项目既有生成器里是 6 元素数组；
+        /// 老实现按列名去重只留第一列 → `RewardID` 只剩第一个值（实测 66 张表里 1005 格数据差异的主因）。
+        ///
+        /// 这里用"别名指向同一规范列名"来造出同名列（xlsx 写表 API 造不出真正的重复表头）。
+        /// </summary>
+        [Test]
+        public void SameNamedColumns_BecomeArrayElements_EmptyCellGetsDefaultElement()
+        {
+            string tmpXlsx = CExcelTestFactory.CreateTempTable(new[]
+            {
+                CExcelTestFactory.Row("ID_i", 1, "A_ia", 100, "B_ia", 200),
+                CExcelTestFactory.Row("ID_i", 2, "A_ia", 300, "B_ia", null),
+            }, "coffeebean_legacy_multi");
+            string tmpOut = Path.Combine(Path.GetTempPath(), "coffeebean_legacy_multi_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                CExcelGenerateOptions options = CExcelTestFactory.LegacyPackageOptions(tmpOut);
+                options.ClassName = "MultiCol";
+                options.ColumnAliases = new Dictionary<string, string[]>
+                {
+                    { "Reward_ia", new[] { "A_ia", "B_ia" } },
+                };
+                CExcelGenerateResult result = CExcelGenerator.Generate(tmpXlsx, options);
+                Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
+
+                string json = CExcelTestFactory.ReadDataJson(CExcelTestFactory.DataPath(options, "MultiCol", "MultiCol"));
+                StringAssert.Contains("\"Reward\":[100,200]", json, "同名列两个单元格 = 两个元素");
+                StringAssert.Contains("\"Reward\":[300,0]", json, "空的同名列 → 该元素给类型默认值 0");
+
+                string text = File.ReadAllText(CExcelTestFactory.CodePath(options, "MultiCol", "MultiCol_DataGetter.cs"));
+                StringAssert.Contains("public int[] Reward;", text, "同名列仍是数组字段");
+            }
+            finally
+            {
+                CExcelTestFactory.DeleteTempFile(tmpXlsx);
+                if (Directory.Exists(tmpOut)) Directory.Delete(tmpOut, true);
+            }
+        }
+
+        /// <summary>
+        /// 数组单元格为空时：**Legacy 给 1 个默认元素（`[0]`）而不是空数组**。
+        /// 项目既有生成器就是这么写的，而业务代码在用常量下标读数组
+        /// （`BuildingItem.cs` 读 `BuildingName[1]`、`BoxDetailPage.cs` 读 `PoolRandom[2]`）——
+        /// 空数组会直接 IndexOutOfRange。
+        /// </summary>
+        [Test]
+        public void EmptyArrayCell_LegacyGetsOneDefaultElement_ModernStaysEmpty()
+        {
+            string tmpXlsx = CExcelTestFactory.CreateTempTable(new[]
+            {
+                CExcelTestFactory.Row("ID_i", 1, "Values_ia", null),
+                CExcelTestFactory.Row("ID_i", 2, "Values_ia", "7"),
+            }, "coffeebean_legacy_emptyarr");
+            string tmpOut = Path.Combine(Path.GetTempPath(), "coffeebean_legacy_emptyarr_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                CExcelGenerateOptions legacy = CExcelTestFactory.LegacyPackageOptions(tmpOut, "ConfigLegacy");
+                legacy.ClassName = "EmptyArr";
+                Assert.IsTrue(CExcelGenerator.Generate(tmpXlsx, legacy).Success);
+                string legacyJson = CExcelTestFactory.ReadDataJson(CExcelTestFactory.DataPath(legacy, "EmptyArr", "EmptyArr"));
+                StringAssert.Contains("\"Values\":[0]", legacyJson, "Legacy：空数组单元格给 1 个默认元素");
+                StringAssert.Contains("\"Values\":[7]", legacyJson);
+
+                string modernOut = tmpOut + "_modern";
+                CExcelGenerateOptions modern = CExcelTestFactory.TempPackageOptions(modernOut, "ConfigModern");
+                modern.ClassName = "EmptyArr";
+                Assert.IsTrue(CExcelGenerator.Generate(tmpXlsx, modern).Success);
+                string modernJson = CExcelTestFactory.ReadDataJson(CExcelTestFactory.DataPath(modern, "EmptyArr", "EmptyArr"));
+                StringAssert.Contains("\"Values\":[]", modernJson, "Modern 保持空数组（不做项目那套补默认值）");
+            }
+            finally
+            {
+                CExcelTestFactory.DeleteTempFile(tmpXlsx);
+                if (Directory.Exists(tmpOut)) Directory.Delete(tmpOut, true);
+                if (Directory.Exists(tmpOut + "_modern")) Directory.Delete(tmpOut + "_modern", true);
+            }
+        }
+
+        /// <summary>
+        /// 备注/说明列**永远不当主键**：否则备注为空的行会被当图例行跳过 ——
+        /// 实测 `PZB_CorrectionMSPD` 老数据 10 行、我们只剩 1 行（`PZB_CorrectionRNG` 9 → 1），
+        /// 而项目既有生成器对这两张表不设主键（全行保留）。
+        /// </summary>
+        [Test]
+        public void RemarkColumn_IsNotPickedAsPrimaryKey_AllRowsKept()
+        {
+            string tmpXlsx = CExcelTestFactory.CreateTempTable(new[]
+            {
+                CExcelTestFactory.Row("Bz_s", "备注A", "Interval_f", 1.5, "Correction_f", 0.1),
+                CExcelTestFactory.Row("Bz_s", null, "Interval_f", 2.5, "Correction_f", 0.2),
+                CExcelTestFactory.Row("Bz_s", null, "Interval_f", 3.5, "Correction_f", 0.3),
+            }, "coffeebean_legacy_remark");
+            string tmpOut = Path.Combine(Path.GetTempPath(), "coffeebean_legacy_remark_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                CExcelGenerateOptions options = CExcelTestFactory.LegacyPackageOptions(tmpOut);
+                options.ClassName = "RemarkProbe";
+                CExcelGenerateResult result = CExcelGenerator.Generate(tmpXlsx, options);
+                Assert.IsTrue(result.Success, string.Join("\n", result.Issues));
+
+                string json = CExcelTestFactory.ReadDataJson(CExcelTestFactory.DataPath(options, "RemarkProbe", "RemarkProbe"));
+                StringAssert.Contains("0.1", json);
+                StringAssert.Contains("0.2", json);
+                StringAssert.Contains("0.3", json, "备注为空的行也必须保留（否则就是丢数据）");
+
+                string text = File.ReadAllText(CExcelTestFactory.CodePath(options, "RemarkProbe", "RemarkProbe_DataGetter.cs"));
+                Assert.IsFalse(text.Contains("GetDataByID"), "没有真主键 → 不生成按主键查询（与项目既有生成器一致）");
+                StringAssert.Contains("public static int GetArrayLenth()", text);
+            }
+            finally
+            {
+                CExcelTestFactory.DeleteTempFile(tmpXlsx);
+                if (Directory.Exists(tmpOut)) Directory.Delete(tmpOut, true);
+            }
+        }
         [Test]
         public void Legacy_NormalTable_UsesProjectNames()
         {

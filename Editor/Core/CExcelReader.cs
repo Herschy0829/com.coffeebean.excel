@@ -78,7 +78,6 @@ namespace CoffeeBean
                 var headerRow = rows[result.HeaderRowIndex];
 
                 // 列名归一：规范列名（别名映射 / trim / 去重），列字母 → 规范列名
-                var normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 int maxCol = headerRow.Count;
                 for (int c = 0; c < maxCol; c++)
                 {
@@ -86,11 +85,14 @@ namespace CoffeeBean
                     if (string.IsNullOrEmpty(raw)) continue;
                     string canonical = ResolveCanonical(raw, options);
                     if (string.IsNullOrEmpty(canonical)) continue;
-                    if (!normalized.ContainsKey(canonical))
+                    if (!result.ColumnLetters.TryGetValue(canonical, out List<string> letters))
                     {
-                        normalized[canonical] = CExcelValue.ColumnLetter(c);
+                        letters = new List<string>();
+                        result.ColumnLetters[canonical] = letters;
                         result.Columns.Add(canonical);
                     }
+                    // 同名列（横排数组）保留**每一列**：6 个 RewardID_ia = 6 元素数组（老实现只留第一列 → 静默丢数据）
+                    letters.Add(CExcelValue.ColumnLetter(c));
                 }
 
                 if (result.Columns.Count == 0)
@@ -111,7 +113,7 @@ namespace CoffeeBean
                     var commentRow = rows[result.HeaderRowIndex - 1];
                     foreach (string column in result.Columns)
                     {
-                        string letter = normalized[column];
+                        string letter = result.ColumnLetters[column][0];
                         object comment = commentRow.TryGetValue(letter, out object c) ? c : null;
                         string text = CExcelValue.ToText(comment).Trim();
                         if (text.Length > 0) result.ColumnComments[column] = text;
@@ -132,10 +134,28 @@ namespace CoffeeBean
                     foreach (string column in result.Columns)
                     {
                         // 按列字母取单元格（MiniExcel useHeaderRow:false 键为列字母）
-                        string letter = normalized[column];
-                        object value = row.TryGetValue(letter, out object cell) ? cell : null;
-                        data[column] = value;
-                        if (value != null && CExcelValue.ToText(value).Length > 0) hasValue = true;
+                        List<string> letters = result.ColumnLetters[column];
+                        if (letters.Count == 1)
+                        {
+                            object cell = row.TryGetValue(letters[0], out object rawCell) ? rawCell : null;
+                            data[column] = cell;
+                            if (cell != null && CExcelValue.ToText(cell).Length > 0) hasValue = true;
+                        }
+                        else
+                        {
+                            // 同名列横排 = 数组：**每列一个元素**（原样文本，内部不再按分隔符拆）
+                            var cells = new List<string>(letters.Count);
+                            bool any = false;
+                            for (int i = 0; i < letters.Count; i++)
+                            {
+                                string text = CExcelValue.ToText(
+                                    row.TryGetValue(letters[i], out object rawCell) ? rawCell : null).Trim();
+                                if (text.Length > 0) any = true;
+                                cells.Add(text);
+                            }
+                            data[column] = cells;
+                            if (any) hasValue = true;
+                        }
                     }
 
                     if (!hasValue)
